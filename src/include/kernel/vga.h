@@ -3,6 +3,7 @@
 
 #include <stdint-gcc.h>
 
+
 #define VGA_BLACK           0x00
 #define VGA_BLUE            0x01
 #define VGA_GREEN           0x02

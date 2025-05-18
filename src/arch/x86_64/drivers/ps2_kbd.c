@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <kernel/ps2_kbd.h>
 
+
 /* I/O ports */
 #define PS2_DATA      0x60
 #define PS2_STATUS    0x64
@@ -24,6 +25,7 @@ static const char map[0x3A] = {
     'a','s','d','f','g','h','j','k','l',';','\'','`',  0,'\\',
     'z','x','c','v','b','n','m',',','.','/',           0,  0,' '
 };
+
 
 /* inb and outb wrappers using intel syntax */
 static inline uint8_t inb(uint16_t port)

@@ -3,6 +3,7 @@
 
 #include <kernel/vga.h>
 
+
 #define VGA_BASE    0xB8000
 #define VGA_WIDTH   80
 #define VGA_HEIGHT  25
@@ -11,6 +12,7 @@ static uint16_t * const vga_buff = (uint16_t *)VGA_BASE;
 static int row = 0;
 static int col = 0;
 static uint8_t color = FG(VGA_LIGHT_GREY) | BG(VGA_BLACK);
+
 
 void vga_setcolor(uint8_t fg, uint8_t bg)
 {

@@ -1,5 +1,4 @@
 extern isr_handler
-
 section .text
 bits 64
 
@@ -54,6 +53,8 @@ isr7:
 global isr8
 isr8:
     push 8
+    nop
+    nop
     jmp isr_handler
 
 global isr9
@@ -65,26 +66,36 @@ isr9:
 global isr10
 isr10:
     push 10
+    nop
+    nop
     jmp isr_handler
 
 global isr11
 isr11:
     push 11
+    nop
+    nop
     jmp isr_handler
 
 global isr12
 isr12:
     push 12
+    nop
+    nop
     jmp isr_handler
 
 global isr13
 isr13:
     push 13
+    nop
+    nop
     jmp isr_handler
 
 global isr14
 isr14:
     push 14
+    nop
+    nop
     jmp isr_handler
 
 global isr15
@@ -102,6 +113,8 @@ isr16:
 global isr17
 isr17:
     push 17
+    nop
+    nop
     jmp isr_handler
 
 global isr18
@@ -125,6 +138,8 @@ isr20:
 global isr21
 isr21:
     push 21
+    nop
+    nop
     jmp isr_handler
 
 global isr22
@@ -172,11 +187,15 @@ isr28:
 global isr29
 isr29:
     push 29
+    nop
+    nop
     jmp isr_handler
 
 global isr30
 isr30:
     push 30
+    nop
+    nop
     jmp isr_handler
 
 global isr31

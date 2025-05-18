@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <kernel/ps2_kbd.h>
+#include <kernel/interrupts.h>
+
 
 void kernel_main() 
 {
@@ -30,8 +32,9 @@ void kernel_main()
     printk("%qd\n", (long long int)LONG_MAX); // "9223372036854775807"
     printk("%qu\n", (long long unsigned int)ULONG_MAX); // "18446744073709551615"
     
-    void ps2_init(void);
-    void keyboard_init(void);
+    ps2_init();
+    keyboard_init();
+    interrupts_init();
 
     while(1) {
         int ascii = keyboard_poll();
@@ -42,4 +45,3 @@ void kernel_main()
         printk("%c", (char)ascii);
     }
 }
-

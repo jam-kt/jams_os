@@ -11,6 +11,7 @@ OUTPUT = "generated_interrupts.asm"
 
 def generate_isr_stubs():
     with open(OUTPUT, 'w') as f:
+        f.write("extern isr_handler\n")
         f.write("section .text\n")
         f.write("bits 64\n\n")
         for i in range(256):
@@ -19,6 +20,8 @@ def generate_isr_stubs():
 
             if i in [8, 10, 11, 12, 13, 14, 17, 21, 29, 30]:
                 f.write(f"    push {i}\n")
+                f.write(f"    nop\n")           # padding so that each stub is 
+                f.write(f"    nop\n")           # the same size (9 bytes)
             else:
                 f.write(f"    push 0\n")        # dummy error code
                 f.write(f"    push {i}\n")
