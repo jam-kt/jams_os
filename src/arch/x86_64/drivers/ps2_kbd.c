@@ -2,7 +2,11 @@
 #include <stdint-gcc.h>
 
 #include <stdio.h>
+#include <kernel/interrupts.h>
 #include <kernel/ps2_kbd.h>
+
+
+static void ISR33_keyboard_irq(int vector, int err, void *arg);
 
 
 /* I/O ports */
@@ -17,6 +21,13 @@
 /* Keyboard replies */
 #define KBD_ACK       0xFA
 #define KBD_RESEND    0xFE
+
+#define KBD_BUFFER_SIZE 16
+#define KBD_ISR_NUM     33
+
+static volatile char kbd_buf[KBD_BUFFER_SIZE];
+static volatile int kbd_prod = 0;
+static volatile int kbd_cons = 0;
 
 /* Scancode set 1 map */
 static const char map[0x3A] = {
@@ -121,27 +132,50 @@ void keyboard_init(void)
     if (res != KBD_ACK) {
         printk("kbd: enable scanning no ACK. Got %x\n", res);
     }
+
+    /* register keyboard interrupt */
+    register_interrupt(KBD_ISR_NUM, 0, TYPE_INTRGATE, ISR33_keyboard_irq, NULL);
 }
 
-/* poll and return ASCII character or -1 for unsupproted/no scancodes */
-int keyboard_poll(void) 
+/* return ASCII character or -1 for unsupproted/no scancodes */
+int keyboard_getchar(void) 
 {
-    if (!(inb(PS2_STATUS) & PS2_STAT_OBF)) {
-        return -1;
+    int enable_ints;
+    int ascii;
+
+    if (are_interrupts_enabled()) {
+        enable_ints = 1;
+        CLI();
     }
+
+    /* retrieve from buffer is there is new data */
+    if (kbd_cons == kbd_prod) {
+        ascii = -1;
+    } else {
+        ascii = kbd_buf[kbd_cons];
+        kbd_cons = (kbd_cons + 1) % KBD_BUFFER_SIZE;
+    }
+
+    if (enable_ints) {
+        STI();
+    }
+
+    return ascii;
+}
+
+/* keyboard producer ISR. ACK to the PIC is handled by common C isr */
+static void ISR33_keyboard_irq(int vector, int err, void *arg)
+{
     uint8_t sc = inb(PS2_DATA);
-
-    /* Ignore scancodes starting with F0 or E0, flush buffer until empty */
-    if ((sc == 0xF0) || (sc == 0xE0)) {
-        while (inb(PS2_STATUS) & PS2_STAT_OBF) {
-            (void)inb(PS2_DATA);
+    if ((sc == 0xF0) || (sc == 0xE0)) {     /* skip multibyte scancodes */
+        return;
+    }
+    
+    if (sc < 0x3A) {                        /* sanity check scancode    */
+        int next = (kbd_prod + 1) % KBD_BUFFER_SIZE;
+        if (next != kbd_cons) {             /* enqueue if not full      */
+            kbd_buf[kbd_prod] = map[sc];
+            kbd_prod = next;
         }
-        return -1;
     }
-
-    if (sc < 0x3A) {
-        return map[sc];
-    }
-
-    return -1;
 }

@@ -2,6 +2,7 @@
 #include <stdint-gcc.h>
 
 #include <kernel/vga.h>
+#include <kernel/interrupts.h>
 
 
 #define VGA_BASE    0xB8000
@@ -14,6 +15,7 @@ static int col = 0;
 static uint8_t color = FG(VGA_LIGHT_GREY) | BG(VGA_BLACK);
 
 
+/* techinically can be have race conditions */
 void vga_setcolor(uint8_t fg, uint8_t bg)
 {
     color = FG(fg) | BG(bg);
@@ -57,7 +59,13 @@ static void vga_backcol()
 
 void vga_display_char(char c)
 {
+    int enable_ints;
     uint8_t uc = (uint8_t)c;
+
+    if (are_interrupts_enabled()) {
+        enable_ints = 1;
+        CLI();
+    }
 
     switch(uc) {
     case '\n':
@@ -85,6 +93,10 @@ void vga_display_char(char c)
         vga_buff[(row * VGA_WIDTH) + col] = (color << 8) | uc;
         vga_nextcol(); 
     }
+
+    if (enable_ints) {
+        STI();
+    }
 }
 
 void vga_display_str(const char *s)
@@ -98,7 +110,7 @@ void vga_clear()
 {
     for (int y = 0; y < VGA_HEIGHT; y++) {
         for (int x = 0; x < VGA_WIDTH; x++) {
-            vga_buff[(y * VGA_WIDTH) + x] = (color << 8) | ' ';
+            vga_display_char(' ');
         }
     }
 

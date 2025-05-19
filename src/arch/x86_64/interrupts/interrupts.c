@@ -53,19 +53,13 @@ void interrupts_init()
     tss_init();
     PIC_init();
 
-    /* disable the IRQs */
-    for (int i = 0; i < 15; i++) {
-        IRQ_set_mask(i);
-    }
+    STI();
 
-    // IRQ_clear_mask(1);  /* enable keyboard irq */
-    
+    /* TODO: move registering handlers to a new file for each specific ISR ? */
     /* register basic double fault handler */
     register_interrupt(8, 1, TYPE_INTRGATE, ISR8_double_fault, NULL);
     /* basic general protection fault handler */
     register_interrupt(13, 2, TYPE_INTRGATE, ISR13_general_protection, NULL);
-
-    STI();
 }
 
 /*
@@ -79,6 +73,8 @@ void register_interrupt(int vector, uint8_t IST, uint8_t type, isr_t handler, vo
 {
     CLI();
 
+    printk("registering %d\n", vector);
+
     if ((vector >= NUM_ISRS) || (vector < 0)) {
         printk("Tried to register an interrupt on a bad vector: %d", vector);
         return;
@@ -88,6 +84,11 @@ void register_interrupt(int vector, uint8_t IST, uint8_t type, isr_t handler, vo
     
     isr_table[vector].handler = handler;
     isr_table[vector].arg = arg;
+
+    /* enable IRQ associated with the interrupt vector if any */
+    if ((vector >= PIC1_VECTOR) && (vector < PIC2_VECTOR + 8)) {
+        IRQ_clear_mask(vector - PIC1_VECTOR);
+    }
 
     STI();
 }
@@ -114,6 +115,8 @@ void c_isr_handler(int vector, int err, void *rsp)
         printk("Interrupt pushed error code: %d (%x)\n", (int)err, (int)err);
         __asm__("hlt");
     }
+
+    IRQ_end_of_interrupt(vector);   /* send EOI for IRQ vectors */
 }
 
 /* double fault handler, use IST 1 */

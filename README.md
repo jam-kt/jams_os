@@ -45,7 +45,6 @@ symbol-file build/kernel-x86_64.bin
 target remote localhost:1234
 
 
-
 IRQ Line	Vector (hex)	Vector (dec)	Typical Device
 0	        0x20	        32	            System timer (PIT)
 1	        0x21	        33	            Keyboard controller

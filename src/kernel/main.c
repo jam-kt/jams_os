@@ -8,8 +8,13 @@
 
 
 void kernel_main() 
-{
+{   
     vga_clear();
+
+    interrupts_init();
+    ps2_init();
+    keyboard_init();
+
     printk("%c\n", 'a'); // should be "a"
     printk("%c\n", 'Q'); // should be "Q"
     printk("%c\n", 256 + '9'); // Should be "9"
@@ -31,13 +36,10 @@ void kernel_main()
     printk("%qd\n", (long long int)LONG_MIN); // "-9223372036854775808"
     printk("%qd\n", (long long int)LONG_MAX); // "9223372036854775807"
     printk("%qu\n", (long long unsigned int)ULONG_MAX); // "18446744073709551615"
-    
-    ps2_init();
-    keyboard_init();
-    interrupts_init();
 
+    /* note that this is still "polling" even though the ISR is getting keyboard input */
     while(1) {
-        int ascii = keyboard_poll();
+        int ascii = keyboard_getchar();
         if (ascii == -1) {
             continue;
         }

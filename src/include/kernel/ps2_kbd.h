@@ -3,6 +3,6 @@
 
 void ps2_init(void);
 void keyboard_init(void);
-int keyboard_poll(void);
+int keyboard_getchar(void);
 
 #endif

@@ -1,7 +1,6 @@
 #include <stddef.h>
 #include <stdint-gcc.h>
 
-#include <kernel/interrupts.h>
 #include <stdio.h>
 
 #include "pic.h"
@@ -36,7 +35,6 @@ static inline void io_wait(void)
 /*******************************************************************************
  * PIC API
  ******************************************************************************/
-void ISR34_IRQ2_cascade(int vector, int err, void *arg);
 static void PIC_remap(int offset1, int offset2);
 
 
@@ -45,10 +43,10 @@ void PIC_init()
     /* reinitialize the PIC, change vector mapping [0x00, 0x1F]->[0x20, 0x2F] */
     PIC_remap(PIC1_VECTOR, PIC2_VECTOR);
 
-    /* register a no-op ISR for IRQ 2 (vector 34) (cascade notification) */
-    register_interrupt(PIC1_VECTOR + 2, 0, TYPE_INTRGATE, ISR34_IRQ2_cascade, NULL);
+    for (int i = 0; i < 15; i++) {      /* disable the IRQs by default */
+        IRQ_set_mask(i);
+    }
 }
-
 
 /*
  * From OSDevWiki
@@ -148,9 +146,4 @@ void IRQ_end_of_interrupt(uint8_t vector)
     if ((vector >= PIC1_VECTOR) && (vector < PIC1_VECTOR + 16)) {
         outb(PIC1_COMMAND, PIC_EOI);
     }
-}
-
-void ISR34_IRQ2_cascade(int vector, int err, void *arg)
-{
-    IRQ_end_of_interrupt(vector);
 }
