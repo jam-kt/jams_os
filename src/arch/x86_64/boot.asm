@@ -160,15 +160,19 @@ p2_table:
     resb 4096
 
 stack_bottom:
-    resb 64
+    resb 4096                               ; initial 4k kernel stack
 stack_top:
 
 
 section .rodata
+global gdt64
 gdt64:
     dq 0 ; zero entry
 .code: equ $ - gdt64                         ; GDT offset
     dq (1<<43) | (1<<44) | (1<<47) | (1<<53) ; code segment
+    dq 0                                     ; data segment (for completeness)
+    dq 0                                     ; TSS descriptor low 8 bytes
+    dq 0                                     ; TSS descriptor high 8 bytes
 .pointer:
     dw $ - gdt64 - 1
     dq gdt64

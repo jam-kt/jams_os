@@ -5,42 +5,86 @@
 #include <stdint-gcc.h>
 
 
+/* ---------------------------- IDT ---------------------------- */
 void idt_init();
 void add_idt_entry(uint8_t vector, uint8_t IST, uint8_t type);
 
+#define STUB_SIZE 9   /* each ASM ISR stub is 9 bytes */
 
-#define STUB_SIZE 9       /* each ASM ISR stub is 9 bytes */
-
-/* 
- * segment selector for dest code segment. Our gdt64.code section is at offset 1
- * which is equal to 8 bytes 
- */
-#define KERNEL_CS 0x08
+/* see the bottom of boot.asm for GDT layout */
+#define KERNEL_CS 0x08      /* kernel code segment descriptor offset in GDT */
 
 /* 
  * IDT entry (Interrupt Gate Descriptor)
  * A 16-byte entry in the Interrupt Descriptor Table
  */
 struct idt_entry {
-  uint16_t offset1;   /* forms 64-bit function ptr to the ISR               */
-  uint16_t select;    /* GDT selector (should be kernel's code segment)     */
+    uint16_t offset1;   /* forms 64-bit function ptr to the ISR               */
+    uint16_t select;    /* GDT selector (should be kernel's code segment)     */
 
-  uint16_t IST:3;     /* interrupt stack table index (0 to stay, else 1-7 ) */
-  uint16_t IGN1:5;    /* reserved         */
-  uint16_t type:4;    /* type             */
-  uint16_t zero:1;    /* always zero      */
-  uint16_t DPL:2;     /* protection level */
-  uint16_t pres:1;    /* present          */
+    uint16_t IST:3;     /* interrupt stack table index (0 to stay, else 1-7 ) */
+    uint16_t IGN1:5;    /* reserved         */
+    uint16_t type:4;    /* type             */
+    uint16_t zero:1;    /* always zero      */
+    uint16_t DPL:2;     /* protection level */
+    uint16_t pres:1;    /* present          */
 
-  uint16_t offset2;
-  uint32_t offset3;
-  uint32_t IGN2;      /* reserved         */
+    uint16_t offset2;
+    uint32_t offset3;
+    uint32_t IGN2;      /* reserved         */
 } __attribute__((packed));
 
 /* load this struct using lidt instruction */
-struct idt_ptr {
-  uint16_t limit;
-  uint64_t base;
+struct idt_descriptor {
+    uint16_t limit;
+    uint64_t base;
+} __attribute__((packed));
+
+
+/* ---------------------------- TSS ---------------------------- */
+void tss_init();
+
+#define TSS_DESC_CS     0x18    /* TSS descriptor byte offset in GDT */
+#define TSS_STACK_SIZE  4096
+#define TSS_TYPE        0x9     /* magic number, means TSS is available */
+
+/* TSS structs */
+struct tss_table {
+    uint32_t IGN0;      /* reserved, ignore */
+    uint64_t rsp0;
+    uint64_t rsp1;
+    uint64_t rsp2;
+    uint64_t IGN1;
+    uint64_t ist1;
+    uint64_t ist2;
+    uint64_t ist3;
+    uint64_t ist4;
+    uint64_t ist5;
+    uint64_t ist6;
+    uint64_t ist7;
+    uint64_t IGN2;
+    uint16_t IGN3;
+    uint16_t io_map_base;
+} __attribute__((packed));
+
+struct tss_descriptor {
+    uint16_t limit1;    /* segment limit [0:15] */
+    uint16_t base1;     /* base address [0:15]  */
+    uint8_t  base2;     /* base address [16:23] */
+
+    uint8_t type:4;     /* type                 */
+    uint8_t zero:1;     /* always zero          */
+    uint8_t DPL:2;      /* protection level     */
+    uint8_t pres:1;     /* present              */
+
+    uint8_t limit2:4;   /* limit [16:19]        */
+    uint8_t AVL:1;      /* bit available to OS  */
+    uint8_t IGN:2;      /* ignore               */
+    uint8_t gran:1;     /* granularity          */
+
+    uint8_t  base3;     /* base address [24:31] */
+    uint32_t base4;     /* base address [32:63] */
+    uint32_t reserved;
 } __attribute__((packed));
 
 #endif

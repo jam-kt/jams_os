@@ -151,6 +151,6 @@ void IRQ_end_of_interrupt(uint8_t vector)
 }
 
 void ISR34_IRQ2_cascade(int vector, int err, void *arg)
-{  
+{
     IRQ_end_of_interrupt(vector);
 }
