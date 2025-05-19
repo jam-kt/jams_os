@@ -9,6 +9,7 @@
 
 
 void ISR8_double_fault(int vector, int err, void *rsp);
+void ISR13_general_protection(int vector, int err, void *rsp);
 
 
 /* Table of C ISR function pointers. Indexed using the interrupt vector num */
@@ -61,6 +62,8 @@ void interrupts_init()
     
     /* register basic double fault handler */
     register_interrupt(8, 1, TYPE_INTRGATE, ISR8_double_fault, NULL);
+    /* basic general protection fault handler */
+    register_interrupt(13, 2, TYPE_INTRGATE, ISR13_general_protection, NULL);
 
     STI();
 }
@@ -109,7 +112,7 @@ void c_isr_handler(int vector, int err, void *rsp)
     } else {
         printk("Unhandled Interrupt Vector: %d\n", vector);
         printk("Interrupt pushed error code: %d (%x)\n", (int)err, (int)err);
-        while(1);
+        __asm__("hlt");
     }
 }
 
@@ -121,7 +124,7 @@ void ISR8_double_fault(int vector, int err, void *rsp)
         uint64_t rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, rip, cs, rflags;
     } *regs = rsp;
 
-    printk("Double fault!\n");
+    printk("!! Double Fault !!\n");
     if (err != 0) {
         printk("Expected a 0 error code for #DF, got: %d\n", (int)err);
     }
@@ -130,4 +133,17 @@ void ISR8_double_fault(int vector, int err, void *rsp)
 
     printk("halting...\n");
     __asm__("hlt");
+}
+
+/* general protection fault handler, use IST 2 */
+void ISR13_general_protection(int vector, int err, void *rsp)
+{
+    struct {
+        uint64_t rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, rip, cs, rflags;
+    } *regs = rsp;
+
+    printk("!! General Protection Fault !!\n");
+    printk("Got error code: %d (%x)\n", (int)err, (int)err);
+
+    printk("RIP = %p\n", (void *)regs->rip);
 }
