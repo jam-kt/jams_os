@@ -73,8 +73,6 @@ void register_interrupt(int vector, uint8_t IST, uint8_t type, isr_t handler, vo
 {
     CLI();
 
-    printk("registering %d\n", vector);
-
     if ((vector >= NUM_ISRS) || (vector < 0)) {
         printk("Tried to register an interrupt on a bad vector: %d", vector);
         return;

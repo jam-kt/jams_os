@@ -1,10 +1,12 @@
 #include <limits.h>
 
-#include <kernel/vga.h>
 #include <string.h>
 #include <stdio.h>
+
+#include <kernel/vga.h>
 #include <kernel/ps2_kbd.h>
 #include <kernel/interrupts.h>
+#include <kernel/serial_out.h>
 
 
 void kernel_main() 
@@ -12,8 +14,12 @@ void kernel_main()
     vga_clear();
 
     interrupts_init();
+    serial_init();
     ps2_init();
     keyboard_init();
+
+    // int stop = 1;
+    // while(stop);
 
     printk("%c\n", 'a'); // should be "a"
     printk("%c\n", 'Q'); // should be "Q"
@@ -36,6 +42,7 @@ void kernel_main()
     printk("%qd\n", (long long int)LONG_MIN); // "-9223372036854775808"
     printk("%qd\n", (long long int)LONG_MAX); // "9223372036854775807"
     printk("%qu\n", (long long unsigned int)ULONG_MAX); // "18446744073709551615"
+
 
     /* note that this is still "polling" even though the ISR is getting keyboard input */
     while(1) {

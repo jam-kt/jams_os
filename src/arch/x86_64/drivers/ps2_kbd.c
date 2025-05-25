@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <kernel/interrupts.h>
+#include <kernel/bbuf.h>
 #include <kernel/ps2_kbd.h>
 
 
@@ -25,16 +26,16 @@ static void ISR33_keyboard_irq(int vector, int err, void *arg);
 #define KBD_BUFFER_SIZE 16
 #define KBD_ISR_NUM     33
 
-static volatile char kbd_buf[KBD_BUFFER_SIZE];
-static volatile int kbd_prod = 0;
-static volatile int kbd_cons = 0;
+static char kbd_buf[KBD_BUFFER_SIZE];
+static struct bbuf_st kbd_st;
 
 /* Scancode set 1 map */
 static const char map[0x3A] = {
-    0, 0,'1','2','3','4','5','6','7','8','9','0','-','=',  '\b',
-    '\t','q','w','e','r','t','y','u','i','o','p','[',']','\n',0,
-    'a','s','d','f','g','h','j','k','l',';','\'','`',  0,'\\',
-    'z','x','c','v','b','n','m',',','.','/',           0,  0,' '
+  0,  27, '1','2','3','4','5','6','7','8','9','0','-','=','\b',
+  '\t','q','w','e','r','t','y','u','i','o','p','[',']','\n',0,
+  'a','s','d','f','g','h','j','k','l',';','\'','`',   0,
+  '\\','z','x','c','v','b','n','m',',','.','/', 0, 0, 0,
+  ' '
 };
 
 
@@ -133,6 +134,8 @@ void keyboard_init(void)
         printk("kbd: enable scanning no ACK. Got %x\n", res);
     }
 
+    bbuf_init(&kbd_st, kbd_buf, KBD_BUFFER_SIZE);
+
     /* register keyboard interrupt */
     register_interrupt(KBD_ISR_NUM, 0, TYPE_INTRGATE, ISR33_keyboard_irq, NULL);
 }
@@ -140,27 +143,12 @@ void keyboard_init(void)
 /* return ASCII character or -1 for unsupproted/no scancodes */
 int keyboard_getchar(void) 
 {
-    int enable_ints;
-    int ascii;
-
-    if (are_interrupts_enabled()) {
-        enable_ints = 1;
-        CLI();
+    char c;
+    if (bbuf_try_consume(&kbd_st, &c)) {  /* read from kbd buffer */
+        return -1;
     }
 
-    /* retrieve from buffer is there is new data */
-    if (kbd_cons == kbd_prod) {
-        ascii = -1;
-    } else {
-        ascii = kbd_buf[kbd_cons];
-        kbd_cons = (kbd_cons + 1) % KBD_BUFFER_SIZE;
-    }
-
-    if (enable_ints) {
-        STI();
-    }
-
-    return ascii;
+    return (int)c;
 }
 
 /* keyboard producer ISR. ACK to the PIC is handled by common C isr */
@@ -172,10 +160,6 @@ static void ISR33_keyboard_irq(int vector, int err, void *arg)
     }
     
     if (sc < 0x3A) {                        /* sanity check scancode    */
-        int next = (kbd_prod + 1) % KBD_BUFFER_SIZE;
-        if (next != kbd_cons) {             /* enqueue if not full      */
-            kbd_buf[kbd_prod] = map[sc];
-            kbd_prod = next;
-        }
+        bbuf_try_add(&kbd_st, map[sc]);     /* add to kbd buffer        */
     }
 }

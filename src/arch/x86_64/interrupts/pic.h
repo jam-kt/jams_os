@@ -4,12 +4,12 @@
 #include <stddef.h>
 #include <stdint-gcc.h>
 
+
 void PIC_init();
 void IRQ_set_mask(uint8_t IRQline);
 void IRQ_clear_mask(uint8_t IRQline);
 int IRQ_get_mask(int IRQline);
 void IRQ_end_of_interrupt(uint8_t vector);
-
 
 /* remapped vector numbers of the IRQs, use these with PIC_remap  */
 #define PIC1_VECTOR 0x20

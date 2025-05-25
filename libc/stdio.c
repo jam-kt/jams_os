@@ -5,16 +5,19 @@
 
 #include <stdio.h>
 #include <kernel/vga.h>
+#include <kernel/serial_out.h>
 
 static int putchar(int c)
 {
     vga_display_char((char)c);
+    serial_display_char((char)c);
     return c;
 }
 
 static void putstr(const char *str)
 {
     vga_display_str(str);
+    serial_display_string(str);
 }
 
 static void print_unsigned(uint64_t num, unsigned base) 
