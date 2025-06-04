@@ -11,6 +11,9 @@ long_mode_start:
     mov fs, ax
     mov gs, ax
 
+    ; pop multiboot tag pointer from %EBX (now %RBX) into %RDI (first arg kmain)
+    pop rdi
+
     ; move control to main.c
     extern kernel_main
     call kernel_main

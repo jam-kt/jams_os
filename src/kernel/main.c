@@ -9,8 +9,8 @@
 #include <kernel/serial_out.h>
 
 
-void kernel_main() 
-{   
+void kernel_main(void *mboot_header) 
+{
     vga_clear();
 
     interrupts_init();
