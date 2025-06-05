@@ -7,6 +7,7 @@
 #include <kernel/ps2_kbd.h>
 #include <kernel/interrupts.h>
 #include <kernel/serial_out.h>
+#include <kernel/frames.h>
 
 
 void kernel_main(void *mboot_header) 
@@ -17,6 +18,7 @@ void kernel_main(void *mboot_header)
     serial_init();
     ps2_init();
     keyboard_init();
+    parse_mboot_tags(mboot_header);
 
     // int stop = 1;
     // while(stop);
@@ -42,6 +44,10 @@ void kernel_main(void *mboot_header)
     printk("%qd\n", (long long int)LONG_MIN); // "-9223372036854775808"
     printk("%qd\n", (long long int)LONG_MAX); // "9223372036854775807"
     printk("%qu\n", (long long unsigned int)ULONG_MAX); // "18446744073709551615"
+
+
+    frames_sequence_test();
+    frames_stress_test();
 
 
     /* note that this is still "polling" even though the ISR is getting keyboard input */

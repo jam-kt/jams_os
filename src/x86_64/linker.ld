@@ -31,5 +31,4 @@ SECTIONS {
         *(COMMON)
         __bss_end = .;       /* symbol: end of BSS */
     }
-
 }

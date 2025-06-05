@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 #include "mboot.h"
-#include "frames.h"
+#include <kernel/frames.h>
 
 
 static void parse_mmap_tag(struct mmap_tag *tag);
@@ -58,7 +58,7 @@ void parse_mboot_tags(void *mboot_header)
 
 static void parse_mmap_tag(struct mmap_tag *tag)
 {
-    struct mmap_entry *entries = (struct mmap_entry *)(tag + sizeof(struct mmap_tag));
+    struct mmap_entry *entries = (struct mmap_entry *)((uint64_t)tag + sizeof(struct mmap_tag));
     int num = (tag->tag_size - sizeof(struct mmap_tag)) / tag->entry_size;
 
     /* walk entries, add usable ones to the usable regions list */
@@ -93,7 +93,7 @@ static void add_usable_region(uint64_t addr, uint64_t size, int entry)
 
 static void parse_elf_tag(struct elf_tag *tag)
 {
-    struct sect_head *headers = (struct sect_head *)(tag + sizeof(struct elf_tag));
+    struct sect_head *headers = (struct sect_head *)((uint64_t)tag + sizeof(struct elf_tag));
 
     /* walk headers and mark kernel text/data regions as occupied (unusable) */
     for (int i = 0; i < tag->num_sect; i++) {
@@ -197,11 +197,82 @@ void *MMU_pf_alloc()
 
 void MMU_pf_free(void *pf)
 {
-    if (pf == NULL) {
-        return;
-    }
+    /* do not check for NULL since NULL = 0x0 and that address is a legit frame */
+    // if (pf == NULL) {
+    //     return;
+    // }
 
     struct pf_header *header = (struct pf_header *)pf;
     header->next = free_frames;
     free_frames = header;
+}
+
+void frames_sequence_test()
+{
+    void *p1, *p2, *p3, *p4, *p5, *p6;
+
+    p1 = MMU_pf_alloc();
+    printk("alloc p1 = %p\n", p1);
+
+    p2 = MMU_pf_alloc();
+    printk("alloc p2 = %p\n", p2);
+
+    p3 = MMU_pf_alloc();
+    printk("alloc p3 = %p\n", p3);
+
+    /* free second page (p2) */
+    MMU_pf_free(p2);
+    printk("freed p2 = %p\n", p2);
+
+    /* alloc should return p2 again */
+    p4 = MMU_pf_alloc();
+    printk("alloc p4 (should == p2) = %p\n", p4);
+
+    p5 = MMU_pf_alloc();
+    printk("alloc p5 = %p (should be a new page)\n", p5);
+
+    MMU_pf_free(p1);
+    printk("freed p1 = %p\n", p1);
+
+    /* alloc should return p1 again */
+    p6 = MMU_pf_alloc();
+    printk("alloc p6 (should == p1) = %p\n", p6);
+
+    MMU_pf_free(p3);
+    MMU_pf_free(p4);
+    MMU_pf_free(p5);
+    MMU_pf_free(p6);
+    printk("frame sequential test complete. Freed p3, p4, p5, p6\n");
+}
+
+void frames_stress_test()
+{
+    int count = 0;
+    void *page = NULL;
+    uint64_t words_in_page = PAGE_SIZE / sizeof(uint64_t);
+
+    /* allocate and test every page frame available */
+    while ((page = MMU_pf_alloc()) != NULL) {
+        count++;
+        uint64_t *pg = (uint64_t *)page;
+        uint64_t pattern = (uint64_t)page;
+
+        /* use the address of the page as a bit pattern for the entire page */
+        for (uint64_t i = 0; i < words_in_page; i++) {
+            pg[i] = pattern;
+        }
+
+        /* read back the bit pattern, report errors */
+
+        for (uint64_t i = 0; i < words_in_page; i++) {
+            if (pg[i] != pattern) {
+                printk("Page frame %p found wrong pattern %p\n",
+                        (void *)pg, (void *)pg[i]);
+
+                return;
+            }
+        }
+    }
+
+    printk("frame stress test complete. %d frames tested\n", count);
 }

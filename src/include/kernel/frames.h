@@ -1,9 +1,11 @@
 #ifndef __FRAMES_H__
 #define __FRAMES_H__
 
-
+void parse_mboot_tags(void *mboot_header);
 void *MMU_pf_alloc();
 void MMU_pf_free(void *pf);
+void frames_sequence_test();
+void frames_stress_test();
 
 /* regions describe entire ranges of addresses, should not be many of them */
 #define MAX_REGIONS 64
