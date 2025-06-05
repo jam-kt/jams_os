@@ -1,11 +1,11 @@
 #include <stdint-gcc.h>
 
-// #include <kernel/memory>
 #include <stdio.h>
 
 #include "mboot.h"
-#include <kernel/frames.h>
+// #include "frames.h"
 
+#include <kernel/frames.h>
 
 static void parse_mmap_tag(struct mmap_tag *tag);
 static void add_usable_region(uint64_t addr, uint64_t size, int entry);
@@ -17,7 +17,7 @@ static void remove_region(uint64_t start, uint64_t end);
 static struct mem_region usable_regions[MAX_REGIONS];
 
 /* list of freed frames, each frame header is stored within the frame (slow) */
-static struct pf_header *free_frames = NULL;
+static struct pf_header *free_frames = (struct pf_header *)INVALID_FRAME_ADDR;
 
 
 void parse_mboot_tags(void *mboot_header)
@@ -97,18 +97,22 @@ static void parse_elf_tag(struct elf_tag *tag)
 
     /* walk headers and mark kernel text/data regions as occupied (unusable) */
     for (int i = 0; i < tag->num_sect; i++) {
-        uint64_t start = headers[i].addr & ~(PAGE_SIZE - 1);
-        uint64_t end = (headers[i].addr + headers[i].size) & ~(PAGE_SIZE - 1);
+        /* round the start and end address to page boundaries */
+        uint64_t start = headers[i].addr;
+        uint64_t end = headers[i].addr + headers[i].size;
         remove_region(start, end);
     }
 }
 
 /* 
  * remove the region from addresses start to end from the usable region list 
- * Note that both start and end should be aligned to a frame
+ * Will round the start and end addresses to align with frame boundaries
  */
 static void remove_region(uint64_t start, uint64_t end)
 {
+    start &= ~(PAGE_SIZE - 1);
+    end = (end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
     for (int i = 0; i < MAX_REGIONS; i++) {
         if (!usable_regions[i].valid) {
             continue;
@@ -164,7 +168,7 @@ static void remove_region(uint64_t start, uint64_t end)
 void *MMU_pf_alloc()
 {
     /* try to allocate from previously freed frames */
-    if (free_frames) {
+    if (free_frames != INVALID_FRAME_ADDR) {
         struct pf_header *node = free_frames;
         free_frames = node->next;
         return (void *)node;
@@ -192,19 +196,19 @@ void *MMU_pf_alloc()
 
     /* no more frames!! */
     printk("Page frame allocator: no more page frames!!\n");
-    return NULL;
+    return INVALID_FRAME_ADDR;
 }
 
 void MMU_pf_free(void *pf)
 {
-    /* do not check for NULL since NULL = 0x0 and that address is a legit frame */
-    // if (pf == NULL) {
-    //     return;
-    // }
+    if (pf == INVALID_FRAME_ADDR) {
+        printk("freed the invalid frame addr placeholder\n");
+        return;
+    }
 
     struct pf_header *header = (struct pf_header *)pf;
     header->next = free_frames;
-    free_frames = header;
+    free_frames = (struct pf_header *)header;
 }
 
 void frames_sequence_test()
@@ -248,11 +252,11 @@ void frames_sequence_test()
 void frames_stress_test()
 {
     int count = 0;
-    void *page = NULL;
+    void *page = INVALID_FRAME_ADDR;
     uint64_t words_in_page = PAGE_SIZE / sizeof(uint64_t);
 
     /* allocate and test every page frame available */
-    while ((page = MMU_pf_alloc()) != NULL) {
+    while ((page = MMU_pf_alloc()) != INVALID_FRAME_ADDR) {
         count++;
         uint64_t *pg = (uint64_t *)page;
         uint64_t pattern = (uint64_t)page;

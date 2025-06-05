@@ -10,6 +10,7 @@ void frames_stress_test();
 /* regions describe entire ranges of addresses, should not be many of them */
 #define MAX_REGIONS 64
 #define PAGE_SIZE 4096
+#define INVALID_FRAME_ADDR ((void *)0xDEADBEEF)
 
 /* keeps tracks of mmap regions */
 struct mem_region {
