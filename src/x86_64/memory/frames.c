@@ -1,11 +1,10 @@
 #include <stdint-gcc.h>
 
 #include <stdio.h>
+#include <kernel/memory.h>
 
-#include "mboot.h"
-// #include "frames.h"
+#include "frames.h"
 
-#include <kernel/frames.h>
 
 static void parse_mmap_tag(struct mmap_tag *tag);
 static void add_usable_region(uint64_t addr, uint64_t size, int entry);
@@ -18,6 +17,8 @@ static struct mem_region usable_regions[MAX_REGIONS];
 
 /* list of freed frames, each frame header is stored within the frame (slow) */
 static struct pf_header *free_frames = (struct pf_header *)INVALID_FRAME_ADDR;
+
+static struct pf_header used_frames[ESTIMATE_FRAME_NUMBERS];
 
 
 void parse_mboot_tags(void *mboot_header)
@@ -261,12 +262,19 @@ void frames_stress_test()
         uint64_t *pg = (uint64_t *)page;
         uint64_t pattern = (uint64_t)page;
 
+        used_frames[count].addr = pattern;
+
         /* use the address of the page as a bit pattern for the entire page */
         for (uint64_t i = 0; i < words_in_page; i++) {
             pg[i] = pattern;
         }
+    }
 
+    /* walk though the frames again */
+    for (int f_num = 0; f_num < count; f_num++) {
         /* read back the bit pattern, report errors */
+        uint64_t *pg = (uint64_t *)used_frames[f_num].addr;
+        uint64_t pattern = (uint64_t)pg;
 
         for (uint64_t i = 0; i < words_in_page; i++) {
             if (pg[i] != pattern) {
