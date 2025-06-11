@@ -51,7 +51,7 @@ void kernel_main(void *mboot_header)
     // frames_sequence_test();
     // frames_stress_test();
 
-    MMU_test();
+    //MMU_test();
 
 
     /* note that this is still "polling" even though the ISR is getting keyboard input */

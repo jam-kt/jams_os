@@ -1,8 +1,6 @@
 #ifndef __MEMORY_H__
 #define __MEMORY_H__
 
-/* THIS IS THE "top level" INCLUDE FILE FOR ALL OF THE PAGING SYSTEM. IF THERE ARE PRIVATE HEADERS
- YOU SHOULD INCLUDE THEM IN vpages.h. THIS IS THE "public" include file that exposes the api */
 
 void parse_mboot_tags(void *mboot_header);
 void frames_sequence_test();

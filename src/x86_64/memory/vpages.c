@@ -15,7 +15,7 @@ static struct p4_entry ptable_p4[512] __attribute__((aligned(4096)));
 static struct p3_entry ptable_p3_identity[512] __attribute__((aligned(4096)));
 
 /* increasing vitrtual address "counter" */
-static uint64_t next_kernel_va = VA_KHEAP_BASE;
+static uint64_t kernel_va = VA_KHEAP_BASE;
 
 
 static struct p1_entry *travel_pagetable(uint64_t va, int create);
@@ -235,18 +235,18 @@ static int demand_page(uint64_t va) {
 }
 
 void *MMU_alloc_page(void) {
-    uint64_t va = next_kernel_va;
+    uint64_t va = kernel_va;
     if (demand_page(va) < 0) {
         return NULL;
     }
 
-    next_kernel_va += PAGE_SIZE;
+    kernel_va += PAGE_SIZE;
 
     return (void *)va;
 }
 
 void *MMU_alloc_pages(int num) {
-    uint64_t base = next_kernel_va;
+    uint64_t base = kernel_va;
     for (int i = 0; i < num; i++) {
         if (demand_page(base + i * PAGE_SIZE) < 0) {
 
@@ -254,7 +254,7 @@ void *MMU_alloc_pages(int num) {
         }
     }
 
-    next_kernel_va += (uint64_t)num * PAGE_SIZE;
+    kernel_va += (uint64_t)num * PAGE_SIZE;
 
     return (void *)base;
 }
@@ -336,7 +336,7 @@ static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg) {
 
 void MMU_init(void) {
     make_identity_map();
-    next_kernel_va = VA_KHEAP_BASE;
+    kernel_va = VA_KHEAP_BASE;
     register_interrupt(14, 0, TYPE_TRAPGATE, ISR14_PAGE_FAULT_HANDLER, NULL);
 }
 
