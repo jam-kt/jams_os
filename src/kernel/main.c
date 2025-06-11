@@ -8,6 +8,7 @@
 #include <kernel/interrupts.h>
 #include <kernel/serial_out.h>
 #include <kernel/memory.h>
+#include <kernel/kmalloc.h>
 
 
 void kernel_main(void *mboot_header) 
@@ -53,6 +54,34 @@ void kernel_main(void *mboot_header)
 
     //MMU_test();
 
+    /* kmalloc tests */
+    size_t test_size = 64;
+    void *p = kmalloc(test_size);
+    if (!p) {
+        printk("kmalloc failed (returned NULL)\n");
+    }
+
+    /* write then read a pattern */
+    memset(p, 0x5A, test_size);
+    for (size_t i = 0; i < test_size; i++) {
+        if (((uint8_t*)p)[i] != 0x5A) {
+            printk("kmalloc memory corrupt\n");
+        }
+    }
+
+    /* free and alloc again to test reuse */
+    kfree(p);
+    void *q = kmalloc(test_size);
+    if (!q) {
+        printk("kmalloc failed on second alloc\n");
+    }
+    if (q != p) {
+        printk("kmalloc returned a different address on reuse\n");
+    }
+
+    kfree(q);
+    printk("test done\n");
+    
 
     /* note that this is still "polling" even though the ISR is getting keyboard input */
     while(1) {

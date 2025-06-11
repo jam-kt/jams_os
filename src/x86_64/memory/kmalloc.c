@@ -2,6 +2,7 @@
 
 #include <kernel/kmalloc.h>
 #include <kernel/memory.h>
+#include <stdio.h>
 
 
 /* used to create a linked list of free blocks within a pool */
@@ -105,8 +106,7 @@ void *kmalloc(size_t size) {
     return (void *)(header + 1);
 }
 
-/* 
- * note that the freed blocks within a pool are marked as available but never
+/* * note that the freed blocks within a pool are marked as available but never
  * freed back to the OS. A pool can expand but it cannot shrink.
  */
 void kfree(void *addr) {
@@ -116,13 +116,13 @@ void kfree(void *addr) {
 
     /* get header using pointer arithmetic from the allocation base addr */
     struct kmalloc_extra *header = (struct kmalloc_extra *)addr - 1;
-
     if (header->pool) {
-        /* add the freed block into the pools free list */
+        struct kmalloc_pool *pool = header->pool;
         struct free_list *node = (struct free_list *)header;
-        node->next = header->pool->head;
-        header->pool->head = node;
-        header->pool->avail++;
+
+        node->next = pool->head;
+        pool->head = node;
+        pool->avail++;
     } else {
         /* just free the virtual pages associated with large allocations */
         size_t total_size = header->size + sizeof(struct kmalloc_extra);
