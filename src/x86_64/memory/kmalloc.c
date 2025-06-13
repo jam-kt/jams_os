@@ -106,7 +106,8 @@ void *kmalloc(size_t size) {
     return (void *)(header + 1);
 }
 
-/* * note that the freed blocks within a pool are marked as available but never
+/* 
+ * note that the freed blocks within a pool are marked as available but never
  * freed back to the OS. A pool can expand but it cannot shrink.
  */
 void kfree(void *addr) {

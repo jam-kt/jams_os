@@ -52,10 +52,10 @@ void kernel_main(void *mboot_header)
     // frames_sequence_test();
     // frames_stress_test();
 
-    //MMU_test();
+    // MMU_test();
 
     /* kmalloc tests */
-    size_t test_size = 64;
+    size_t test_size = 48;
     void *p = kmalloc(test_size);
     if (!p) {
         printk("kmalloc failed (returned NULL)\n");
@@ -80,6 +80,22 @@ void kernel_main(void *mboot_header)
     }
 
     kfree(q);
+
+    void *big_block = kmalloc(4096);
+    if (!big_block) {
+        printk("big block not allocated\n");
+    }
+
+    memset(big_block, 0xAA, 4096);
+    for (size_t i = 0; i < 4096; i++) {
+        if (((uint8_t*)big_block)[i] != 0xAA) {
+            printk("kmalloc memory corrupt\n");
+        }
+    }
+
+    kfree(big_block);
+
+
     printk("test done\n");
     
 
