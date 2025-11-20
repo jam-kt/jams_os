@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "memory.h": "c",
+        "interrupts.h": "c",
+        "string.h": "c"
+    }
+}

@@ -9,14 +9,17 @@
 #include <kernel/serial_out.h>
 #include <kernel/memory.h>
 #include <kernel/kmalloc.h>
+#include <kernel/syscall.h>
+#include <kernel/multitask.h>
 
 
 void kernel_main(void *mboot_header) 
 {
     vga_clear();
-
     interrupts_init();
     serial_init();
+    syscall_init();
+    multitask_init();
     ps2_init();
     keyboard_init();
     parse_mboot_tags(mboot_header);
@@ -98,6 +101,7 @@ void kernel_main(void *mboot_header)
 
     printk("test done\n");
     
+    yield();
 
     /* note that this is still "polling" even though the ISR is getting keyboard input */
     while(1) {

@@ -1,37 +1,6 @@
-# CPE454-kernel
-CPE454 Kernel Project
+# x86_64 Kernel Project
 
-
-CPE453-kernel/
-├── .gitignore
-├── Makefile
-├── README.md
-├── make-image.sh
-├── src/
-│   ├── arch/
-│   │   └── x86_64/
-│   │       ├── drivers/
-│   │       │   ├── vga.c
-│   │       │   └── ps2_kbd.c
-│   │       ├── boot.asm
-│   │       ├── grub.cfg
-│   │       ├── linker.ld
-│   │       ├── long_mode_init.asm
-|   |       └── multiboot_header.asm
-│   ├── include/
-│   │   └── kernel/
-│   │       ├── vga.h
-│   │       └── ps2_kbd.h
-|   └── kernel/
-│       └── main.c
-├── libc/
-│   ├── arch/
-│   │   └── x86_64/
-│   ├── include/
-│   │   ├── stdio.h
-│   │   └── string.h
-│   ├── string.c
-│   └── stdio.c
+use $make run
 
 
 If permission error occurs wheb trying to $make run then ensure the shell script 
@@ -45,20 +14,21 @@ symbol-file build/kernel-x86_64.bin
 target remote localhost:1234
 
 
-IRQ Line	Vector (hex)	Vector (dec)	Typical Device
-0	        0x20	        32	            System timer (PIT)
-1	        0x21	        33	            Keyboard controller
-2	        0x22	        34	            Cascade for slave PIC (IRQs 8–15)
-3	        0x23	        35	            COM2/COM4 serial port
-4	        0x24	        36          	COM1/COM3 serial port
-5	        0x25	        37	            LPT2 or (sound card)
-6	        0x26	        38	            Floppy disk controller
-7	        0x27	        39	            LPT1 parallel port
-8	        0x28	        40  	        Real-Time Clock (RTC)
-9	        0x29	        41	            ACPI or (spare for PCI)
-10	        0x2A	        42	            PCI IRQ2 (or “reserved”)
-11	        0x2B	        43	            PCI IRQ3 (or “reserved”)
-12	        0x2C	        44  	        PS/2 Mouse
-13	        0x2D	        45	            FPU / Coprocessor / Inter-Chip
-14	        0x2E	        46	            Primary ATA channel (IDE0)
-15	        0x2F	        47	            Secondary ATA channel (IDE1)
+There are sixteen 64-bit registers in x86-64: %rax, %rbx, %rcx, %rdx, %rdi, %rsi, %rbp,
+%rsp, and %r8-r15. Of these, %rax, %rcx, %rdx, %rdi, %rsi, %rsp, and %r8-r11 are
+considered caller-save registers, meaning that they are not necessarily saved across function
+calls. By convention, %rax is used to store a function’s return value, if it exists and is no more
+than 64 bits long. (Larger return types like structs are returned using the stack.) Registers %rbx,
+%rbp, and %r12-r15 are callee-save registers, meaning that they are saved across function
+calls. Register %rsp is used as the stack pointer, a pointer to the topmost element in the stack.
+Additionally, %rdi, %rsi, %rdx, %rcx, %r8, and %r9 are used to pass the first six integer
+or pointer parameters to called functions. Additional parameters (or large parameters such as
+structs passed by value) are passed on the stack.
+In 32-bit x86, the base pointer (formerly %ebp, now %rbp) was used to keep track of the base of
+the current stack frame, and a called function would save the base pointer of its caller prior to
+updating the base pointer to its own stack frame. With the advent of the 64-bit architecture, this
+has been mostly eliminated, save for a few special cases when the compiler cannot determine
+ahead of time how much stack space needs to be allocated for a particular function
+
+https://cs.brown.edu/courses/cs033/docs/guides/x64_cheatsheet.pdf
+

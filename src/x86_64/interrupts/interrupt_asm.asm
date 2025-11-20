@@ -19,8 +19,8 @@ isr_handler:
     ; save the vector number and error code according to System V AMD64 ABI
     ; move past the recently pushed items in the stack (72 bytes worth) to 
     ; reach the vector num and error code the stub pushed
-    mov rdi, [rsp + 72]     ; vector
     mov rsi, [rsp + 80]     ; error
+    mov rdi, [rsp + 72]     ; vector
     mov rdx, rsp            ; pass the stack pointer into 3rd C function arg
 
     call c_isr_handler      ; c_irq_handler(int irq, unsigned err)

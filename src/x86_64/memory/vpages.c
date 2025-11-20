@@ -337,7 +337,7 @@ static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg) {
 void MMU_init(void) {
     make_identity_map();
     kernel_va = VA_KHEAP_BASE;
-    register_interrupt(14, 0, TYPE_TRAPGATE, ISR14_PAGE_FAULT_HANDLER, NULL);
+    register_interrupt(14, 3, TYPE_TRAPGATE, ISR14_PAGE_FAULT_HANDLER, NULL);
 }
 
 void MMU_test(void) {
@@ -393,7 +393,7 @@ void MMU_test(void) {
 
     /* since we freed the page this should be unrecoverable */
     printk("\nTests passed\n");
-    printk("\nTrying to purposly cause a fatal page fault...\n");
+    printk("\nTrying to purposely cause a fatal page fault...\n");
     page1[0] = '!'; 
     
     
