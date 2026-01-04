@@ -8,9 +8,12 @@
 
 
 #define SYSCALL_ISR_VECTOR 128
+/* temp kexit fix */
+#define KEXIT_ISR_VECTOR_TEMP 0x81
 
 
 static void ISR128_syscall(int vector, int err, void *rsp);
+static void ISR129_kexit(int vector, int err, void *rsp);
 
 
 /* Table of syscall function pointers. Indexed using the syscall num */
@@ -32,6 +35,13 @@ void syscall_init()
     // otherwise we would fault when trying to syscall from user space
     // requires modifying the interrupts api to allow an extra arg
     register_interrupt(SYSCALL_ISR_VECTOR, 0, TYPE_TRAPGATE, ISR128_syscall, NULL);
+
+    /* this temp interrupt will allow the kexit syscall to run on IST 3 
+     * The generic syscalls may not run on IST3 since it causes issues with 
+     * yield saving the wrong rsp. Once we have a cleanup thread remove this
+     * vector and call kexit using the syscall vector on 0x80
+     */
+    register_interrupt(KEXIT_ISR_VECTOR_TEMP, 3, TYPE_TRAPGATE, ISR129_kexit, NULL);
 }
 
 void register_syscall(int sys_num, sys_t handler)
@@ -82,4 +92,16 @@ static void ISR128_syscall(int vector, int err, void *rsp)
 
     // TODO: return the specific syscalls return code... regs->rax = ret 
     // not strictly needed since our syscalls can print and terminate for errors
+}
+
+static void ISR129_kexit(int vector, int err, void *rsp)
+{
+    /* sanity */
+    if (syscall_table[SYS_KEXIT_NUM].handler != NULL) {
+        /* just call it directly */
+        syscall_table[SYS_KEXIT_NUM].handler(0, 0, 0, 0, 0, 0);
+    } else {
+        printk("kexit syscall handler not registered!\n");
+        __asm__("hlt");
+    }
 }

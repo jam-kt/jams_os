@@ -37,20 +37,6 @@ void multitask_init()
     register_syscall(SYS_KEXIT_NUM, syscall_kexit);
 }
 
-void syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
-                    uint64_t a5, uint64_t a6)
-{
-    printk("We made it into the yield syscall\n");
-
-    (void)a1;
-    (void)a2;
-    (void)a3;
-    (void)a4;
-    (void)a5;
-    (void)a6;
-    PROC_reschedule();
-}
-
 /* the public facing syscalls */
 void yield(void) 
 {
@@ -61,7 +47,55 @@ void yield(void)
 void kexit(void)
 {
     register long nr asm("rax") = SYS_KEXIT_NUM;
-    asm volatile("int 0x80" : "+a"(nr) :: "memory");
+    /* TODO: SWITCH BACK TO VECTOR 0x80 ONCE WE HAVE A CLEANUP THREAD 
+     * SEE syscalls.c FOR REST OF THE TEMP KEXIT RUGPULL FIX */
+    asm volatile("int 0x81" : "+a"(nr) :: "memory");
+}
+
+void syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+                    uint64_t a5, uint64_t a6)
+{
+    (void)a1;
+    (void)a2;
+    (void)a3;
+    (void)a4;
+    (void)a5;
+    (void)a6;
+    PROC_reschedule();
+}
+
+static void syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+                          uint64_t a5, uint64_t a6)
+{
+    (void)a1;
+    (void)a2;
+    (void)a3;
+    (void)a4;
+    (void)a5;
+    (void)a6;
+
+    if (curr_proc == NULL) {
+        return;
+    }
+
+    proc exiting = curr_proc;
+    if (exiting == &main_proc) {
+        printk("kexit called on main thread, halting\n");
+        __asm__("hlt");
+    }
+
+    sched->remove(exiting);
+    curr_proc = NULL;
+
+    if (exiting->stack) {
+        kfree(exiting->stack);
+    }
+
+    if (exiting != &main_proc) {
+        kfree(exiting);
+    }
+
+    PROC_reschedule();
 }
 
 void PROC_run(void)
@@ -111,10 +145,10 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
 
     uint64_t *stack_top = (uint64_t *)sp;
 
-    /* "pushing" what is normall saved on an interrupt (restored by iretq) */
+    /* "pushing" what is normall saved on an interrupt (restored by iretq)  */
     /* NOTE: on priv level changes IRETQ will pop more than RIP, CS, RFLAGS */
-    *--stack_top = 0;           /* SS (0 is fine for kernel mode in 64-bit) */
-    *--stack_top = (uint64_t)sp; /* RSP (Points to the top of the stack) */
+    *--stack_top = 0;               /* SS (0 is fine for kernel mode)       */
+    *--stack_top = (uint64_t)sp;    /* RSP (Points to the top of the stack) */
     *--stack_top = DEFAULT_RFLAGS;
     *--stack_top = KERNEL_CS;
     *--stack_top = (uint64_t)kthread_start; /* set RIP to a trampoline */
@@ -167,44 +201,12 @@ void PROC_reschedule(void)
     next_proc = candidate;
 }
 
-static void syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
-                          uint64_t a5, uint64_t a6)
-{
-    (void)a1;
-    (void)a2;
-    (void)a3;
-    (void)a4;
-    (void)a5;
-    (void)a6;
 
-    if (curr_proc == NULL) {
-        return;
-    }
-
-    proc exiting = curr_proc;
-    if (exiting == &main_proc) {
-        printk("kexit called on main thread, halting\n");
-        __asm__("hlt");
-    }
-
-    sched->remove(exiting);
-    curr_proc = NULL;
-
-    if (exiting->stack) {
-        kfree(exiting->stack);
-    }
-
-    if (exiting != &main_proc) {
-        kfree(exiting);
-    }
-
-    PROC_reschedule();
-}
 
 static void kthread_start(kproc_t entry, void *arg)
 {
-    printk("made into kthread_start\n");
     entry(arg);
+    printk("A thread fell out of their function, calling kexit on thread\n");
     kexit();
 }
 

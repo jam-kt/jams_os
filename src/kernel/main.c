@@ -28,7 +28,7 @@ static void worker_c(void *arg)
 {
     int id = (int)(uintptr_t)arg;
     int count = 0;
-    while (1) {
+    for (int i = 0; i < 10; i++) {
         printk("[C%d] count=%d\n", id, count++);
         //dump_stack("[C]", 3);
         yield();
@@ -130,9 +130,22 @@ void kernel_main(void *mboot_header)
     PROC_create_kthread(worker_c, (void *)2);
     PROC_create_kthread(worker_c, (void *)3);
     
-    while (1) {
+    for (int i = 0; i < 10; i++) {
         int begin_debug = 1;
         while(!begin_debug);
         PROC_run();
+    }
+
+    printk("Done with test loop\n");
+
+    while(1) {
+        PROC_run();
+        
+        int ascii = keyboard_getchar();
+        if (ascii == -1) {
+            continue;
+        }
+
+        printk("%c", (char)ascii);
     }
 }
