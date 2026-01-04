@@ -51,4 +51,4 @@ build/%.o: %.c
 # Generic rule for assembling .asm files.
 build/%.o: %.asm
 	@mkdir -p $(dir $@)
-	@nasm -f elf64 $< -o $@
+	@nasm -f elf64 -g -F dwarf $< -o $@

@@ -20,7 +20,10 @@ void syscall_init();
 void register_syscall(int sys_num, sys_t handler);
 
 
-/* keep all syscall numbers here so we dont reuse (is this a good idea?) */
+/* keep all syscall numbers here so we dont reuse (is this a good idea?) 
+ * Mirror this style and have all interrupt vectors in one place too? */
+
 #define SYS_YIELD_NUM 0
+#define SYS_KEXIT_NUM 1
 
 #endif

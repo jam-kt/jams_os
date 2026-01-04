@@ -62,7 +62,7 @@ static void rr_remove(proc victim) {
     proc curr = Head;
 
     if(!victim) {
-        fprintf(stderr, "rr_remove: NULL proc pointer as victim\n");
+        printk("rr_remove: NULL proc pointer as victim\n");
         return;
     }
 
@@ -77,8 +77,10 @@ static void rr_remove(proc victim) {
     }
 
     if(Tail == NULL && Head) {
-        fprintf(stderr, "NULL tail and real head\n");
-        exit(1);
+        printk("NULL tail and real head\n");
+        printk("halting...\n");
+        __asm__("hlt");
+
     }
 
     /* search the buffer and remove if found */
@@ -106,7 +108,7 @@ static void rr_remove(proc victim) {
         
         /* prevents an infinite loop if the victim is not found */
         if(curr == Head) {
-            fprintf(stderr, "rr_remove: victim not found\n");
+            printk("rr_remove: victim not found\n");
             return;
         }
     }

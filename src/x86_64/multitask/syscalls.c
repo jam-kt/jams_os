@@ -53,7 +53,8 @@ static void ISR128_syscall(int vector, int err, void *rsp)
 {
     /* use passed rsp to get syscall args from stack */
     struct {
-        uint64_t r11, r10, r9, r8, rdi, rsi, rdx, rcx, rax;
+        uint64_t r15, r14, r13, r12, rbp, rbx, 
+                    r11, r10, r9, r8, rdi, rsi, rdx, rcx, rax;
     } *regs = rsp;
     
     /* match the AMD64 ABI */

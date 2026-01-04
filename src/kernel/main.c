@@ -1,4 +1,5 @@
 #include <limits.h>
+#include <stdint-gcc.h>
 
 #include <string.h>
 #include <stdio.h>
@@ -12,6 +13,27 @@
 #include <kernel/syscall.h>
 #include <kernel/multitask.h>
 
+
+// static void dump_stack(const char *tag, int count)
+// {
+//     uint64_t *sp;
+//     asm volatile ("mov %%rsp, %0" : "=r"(sp));
+//     printk("%s RSP=%p\n", tag, sp);
+//     for (int i = 0; i < count; i++) {
+//         printk("  [%d] %p\n", i, (void *)sp[i]);
+//     }
+// }
+
+static void worker_c(void *arg)
+{
+    int id = (int)(uintptr_t)arg;
+    int count = 0;
+    while (1) {
+        printk("[C%d] count=%d\n", id, count++);
+        //dump_stack("[C]", 3);
+        yield();
+    }
+}
 
 void kernel_main(void *mboot_header) 
 {
@@ -100,16 +122,17 @@ void kernel_main(void *mboot_header)
 
 
     printk("test done\n");
+
+  
+
+    PROC_run();
+    PROC_create_kthread(worker_c, (void *)1);
+    PROC_create_kthread(worker_c, (void *)2);
+    PROC_create_kthread(worker_c, (void *)3);
     
-    yield();
-
-    /* note that this is still "polling" even though the ISR is getting keyboard input */
-    while(1) {
-        int ascii = keyboard_getchar();
-        if (ascii == -1) {
-            continue;
-        }
-
-        printk("%c", (char)ascii);
+    while (1) {
+        int begin_debug = 0;
+        while(!begin_debug);
+        PROC_run();
     }
 }

@@ -31,4 +31,6 @@ has been mostly eliminated, save for a few special cases when the compiler canno
 ahead of time how much stack space needs to be allocated for a particular function
 
 https://cs.brown.edu/courses/cs033/docs/guides/x64_cheatsheet.pdf
+https://users.ece.utexas.edu/~adnan/gdb-refcard.pdf
+
 
