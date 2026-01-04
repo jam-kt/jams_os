@@ -31,7 +31,7 @@ void syscall_init()
     // TODO: very likely need to make the gate user-callable via DPL=3
     // otherwise we would fault when trying to syscall from user space
     // requires modifying the interrupts api to allow an extra arg
-    register_interrupt(SYSCALL_ISR_VECTOR, 3, TYPE_TRAPGATE, ISR128_syscall, NULL);
+    register_interrupt(SYSCALL_ISR_VECTOR, 0, TYPE_TRAPGATE, ISR128_syscall, NULL);
 }
 
 void register_syscall(int sys_num, sys_t handler)

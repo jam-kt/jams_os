@@ -113,6 +113,8 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
 
     /* "pushing" what is normall saved on an interrupt (restored by iretq) */
     /* NOTE: on priv level changes IRETQ will pop more than RIP, CS, RFLAGS */
+    *--stack_top = 0;           /* SS (0 is fine for kernel mode in 64-bit) */
+    *--stack_top = (uint64_t)sp; /* RSP (Points to the top of the stack) */
     *--stack_top = DEFAULT_RFLAGS;
     *--stack_top = KERNEL_CS;
     *--stack_top = (uint64_t)kthread_start; /* set RIP to a trampoline */

@@ -131,7 +131,7 @@ void kernel_main(void *mboot_header)
     PROC_create_kthread(worker_c, (void *)3);
     
     while (1) {
-        int begin_debug = 0;
+        int begin_debug = 1;
         while(!begin_debug);
         PROC_run();
     }
