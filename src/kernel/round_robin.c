@@ -10,6 +10,7 @@
 
 #include <kernel/scheduler.h>
 #include <kernel/multitask.h>
+#include <kernel/interrupts.h>
 
 
 /* circular buffer pointers and total node count */
@@ -38,6 +39,11 @@ scheduler round_robin = &rr_publish;
 
 
 static void rr_admit(proc new) {
+    int ints_enabled = are_interrupts_enabled();
+    if (ints_enabled) {
+        CLI();
+    }
+
     /* initialize the circular buffer if it doesn't exist */
     if(!Head) {
         Head = new;
@@ -54,16 +60,25 @@ static void rr_admit(proc new) {
     }
 
     Count++;
+
+    if (ints_enabled) {
+        STI();
+    }
 }
 
 
 static void rr_remove(proc victim) {
+    int ints_enabled = are_interrupts_enabled();
+    if (ints_enabled) {
+        CLI();
+    }
+
     proc prev = Tail;
     proc curr = Head;
 
     if(!victim) {
         printk("rr_remove: NULL proc pointer as victim\n");
-        return;
+        goto enable_and_return;
     }
 
     /* if there's only one proc, remove and reset the buffer */
@@ -73,14 +88,13 @@ static void rr_remove(proc victim) {
         Current = NULL;
         Count = 0;
 
-        return;
+        goto enable_and_return;
     }
 
     if(Tail == NULL && Head) {
         printk("NULL tail and real head\n");
         printk("halting...\n");
         __asm__("hlt");
-
     }
 
     /* search the buffer and remove if found */
@@ -100,7 +114,7 @@ static void rr_remove(proc victim) {
 
             Count--;
 
-            return;
+            goto enable_and_return;
         }
 
         prev = curr;
@@ -109,19 +123,39 @@ static void rr_remove(proc victim) {
         /* prevents an infinite loop if the victim is not found */
         if(curr == Head) {
             printk("rr_remove: victim not found\n");
-            return;
+            goto enable_and_return;
         }
     }
+
+enable_and_return:
+    if (ints_enabled) {
+        STI();
+    }
+
+    return;
 }
 
 
 static proc rr_next() {
+    int ints_enabled = are_interrupts_enabled();
+    if (ints_enabled) {
+        CLI();
+    }
+
     if(!Head) {
+        if (ints_enabled) {
+            STI();
+        }
+
         return NULL;
     }
 
     proc upNext = Current;
     Current = Current->sched_one;
+
+    if (ints_enabled) {
+        STI();
+    }
 
     return upNext;
 }

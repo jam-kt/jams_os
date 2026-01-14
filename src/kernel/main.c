@@ -35,6 +35,30 @@ static void worker_c(void *arg)
     }
 }
 
+static void kbd_io_thread(void *arg)
+{
+    printk("made into kbd thread\n");
+
+    (void)arg;
+
+    while (1) {
+        int c = keyboard_getchar();
+        if (c == -1) {
+            continue;
+        }
+        printk("%c\n", (char)c);
+    }
+}
+
+static void kernel_thread(void *arg)
+{
+    printk("in the kernel thread\n");
+
+    while (1) {
+        yield();
+    }
+}
+
 void kernel_main(void *mboot_header) 
 {
     vga_clear();
@@ -46,9 +70,6 @@ void kernel_main(void *mboot_header)
     keyboard_init();
     parse_mboot_tags(mboot_header);
     MMU_init();
-
-    // int stop = 1;
-    // while(stop);
 
     printk("%c\n", 'a'); // should be "a"
     printk("%c\n", 'Q'); // should be "Q"
@@ -131,21 +152,21 @@ void kernel_main(void *mboot_header)
     PROC_create_kthread(worker_c, (void *)3);
     
     for (int i = 0; i < 10; i++) {
-        int begin_debug = 1;
-        while(!begin_debug);
         PROC_run();
     }
 
     printk("Done with test loop\n");
 
-    while(1) {
-        PROC_run();
-        
-        int ascii = keyboard_getchar();
-        if (ascii == -1) {
-            continue;
-        }
+    int stop = 1;
+    while(stop);
 
-        printk("%c", (char)ascii);
+    PROC_create_kthread(kernel_thread, NULL);
+
+    PROC_create_kthread(kbd_io_thread, NULL);
+    printk("made keyboard thread\n");
+
+
+    while (1) {
+        PROC_run();
     }
 }

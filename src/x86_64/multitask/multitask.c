@@ -29,6 +29,9 @@ static void syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
 static void kthread_start(kproc_t entry, void *arg);
 static uintptr_t align_down(uintptr_t addr, size_t align);
 
+static void enqueue(proc_queue *q, proc p);
+static proc dequeue(proc_queue *q);
+
 
 void multitask_init()
 {
@@ -201,8 +204,6 @@ void PROC_reschedule(void)
     next_proc = candidate;
 }
 
-
-
 static void kthread_start(kproc_t entry, void *arg)
 {
     entry(arg);
@@ -213,4 +214,94 @@ static void kthread_start(kproc_t entry, void *arg)
 static uintptr_t align_down(uintptr_t addr, size_t align)
 {
     return addr & ~(align - 1);
+}
+
+
+/* process management code */
+
+void PROC_init_queue(proc_queue *q)
+{
+    q->head = NULL;
+    q->tail = NULL;
+}
+
+/* must be run while interrupts are disabled */
+void PROC_block_on(proc_queue *q, int enable_ints)
+{
+    if (!q) {
+        printk("PROC_block_on: no queue to block on\n");
+        return;
+    }
+
+    /* move from scheduler into driver's blocking queue */
+    sched->remove(curr_proc);
+    enqueue(q, curr_proc);
+
+    if (enable_ints) {
+        STI();
+    }
+
+    yield();
+}
+
+void PROC_unblock_head(proc_queue *q)
+{
+    if (!q || !q->head) {
+        printk("PROC_unblock_head: queue or queue head is null");
+        return;
+    }
+
+    proc p = dequeue(q);
+    if (p) {
+        sched->admit(p);
+    }
+}
+
+void PROC_unblock_all(proc_queue *q)
+{
+    if (!q) {
+        printk("PROC_unblock_all: queue is null\n");
+        return;
+    }
+
+    while (q->head) {
+        PROC_unblock_head(q);
+    }
+}
+
+/* adds a proc to the tail of the queue */
+static void enqueue(proc_queue *q, proc p)
+{
+    p->lib_one = NULL;
+
+    /* init the queue if it empty */
+    if (!q->head) {
+        q->head = p;
+        q->tail = p;
+    } else {
+        q->tail->lib_one = p;
+        q->tail = p; 
+    }
+}
+
+/* removes a proc from the head of the queue */
+static proc dequeue(proc_queue *q)
+{
+    if (q->head) {
+        printk("dequeue (from multitasking): no head in the queue\n");
+        return NULL;
+    }
+
+    proc temp = q->head;
+
+    if (q->head == q->tail) {
+        q->head = NULL;
+        q->tail = NULL;
+    } else {
+        q->head = temp->lib_one;
+    }
+
+    temp->lib_one = NULL;
+
+    return temp;
 }

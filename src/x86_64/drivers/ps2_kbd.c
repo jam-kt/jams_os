@@ -5,6 +5,7 @@
 #include <kernel/interrupts.h>
 #include <kernel/bbuf.h>
 #include <kernel/ps2_kbd.h>
+#include <kernel/multitask.h>
 
 
 static void ISR33_keyboard_irq(int vector, int err, void *arg);
@@ -28,6 +29,8 @@ static void ISR33_keyboard_irq(int vector, int err, void *arg);
 
 static char kbd_buf[KBD_BUFFER_SIZE];
 static struct bbuf_st kbd_st;
+
+static proc_queue kbd_wait_queue;
 
 /* Scancode set 1 map */
 static const char map[0x3A] = {
@@ -136,6 +139,8 @@ void keyboard_init(void)
 
     bbuf_init(&kbd_st, kbd_buf, KBD_BUFFER_SIZE);
 
+    PROC_init_queue(&kbd_wait_queue);
+
     /* register keyboard interrupt */
     register_interrupt(KBD_ISR_NUM, 0, TYPE_INTRGATE, ISR33_keyboard_irq, NULL);
 }
@@ -144,10 +149,9 @@ void keyboard_init(void)
 int keyboard_getchar(void) 
 {
     char c;
-    if (bbuf_try_consume(&kbd_st, &c)) {  /* read from kbd buffer */
-        return -1;
-    }
 
+    wait_event_interruptable(kbd_wait_queue, (bbuf_try_consume(&kbd_st, &c) == 0));
+    
     return (int)c;
 }
 
