@@ -151,7 +151,7 @@ int keyboard_getchar(void)
     char c;
 
     wait_event_interruptable(kbd_wait_queue, (bbuf_try_consume(&kbd_st, &c) == 0));
-    
+
     return (int)c;
 }
 
@@ -165,5 +165,6 @@ static void ISR33_keyboard_irq(int vector, int err, void *arg)
     
     if (sc < 0x3A) {                        /* sanity check scancode    */
         bbuf_try_add(&kbd_st, map[sc]);     /* add to kbd buffer        */
+        PROC_unblock_head(&kbd_wait_queue);
     }
 }

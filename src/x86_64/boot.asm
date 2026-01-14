@@ -163,7 +163,7 @@ p2_table:
     resb 4096
 
 stack_bottom:
-    resb 4096                               ; initial 4k kernel stack
+    resb 16384                              ; initial 4k kernel stack
 stack_top:
 
 

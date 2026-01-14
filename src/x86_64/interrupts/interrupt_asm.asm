@@ -44,7 +44,7 @@ isr_handler:
     jz  .restore
     cmp rax, rbx                ; if curr == next proc skip context switch
     je  .restore               
-    test rbx, rbx               ; edge case check if curr_proc == NULL
+    test rbx, rbx               ; check if curr_proc == NULL, happens on kexit
     jz  .swap_context
 
     mov [rbx + PROC_STATE_RSP_OFFSET], rsp  ; save sp into curr's context struct

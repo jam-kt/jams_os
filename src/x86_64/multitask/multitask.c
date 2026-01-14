@@ -248,6 +248,9 @@ void PROC_unblock_head(proc_queue *q)
 {
     if (!q || !q->head) {
         printk("PROC_unblock_head: queue or queue head is null");
+        printk("This warning may be harmless if no thread called the blocking\
+            wait function but the ISR related to it fired. Ex. keyboard ISR but\
+            no thread is calling kbd_read\n");
         return;
     }
 
@@ -287,7 +290,7 @@ static void enqueue(proc_queue *q, proc p)
 /* removes a proc from the head of the queue */
 static proc dequeue(proc_queue *q)
 {
-    if (q->head) {
+    if (!q->head) {
         printk("dequeue (from multitasking): no head in the queue\n");
         return NULL;
     }
@@ -304,4 +307,9 @@ static proc dequeue(proc_queue *q)
     temp->lib_one = NULL;
 
     return temp;
+}
+
+int num_proc_runnable()
+{
+    return sched->qlen();
 }
