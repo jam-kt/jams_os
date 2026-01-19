@@ -247,10 +247,10 @@ void PROC_block_on(proc_queue *q, int enable_ints)
 void PROC_unblock_head(proc_queue *q)
 {
     if (!q || !q->head) {
-        printk("PROC_unblock_head: queue or queue head is null");
-        printk("This warning may be harmless if no thread called the blocking\
-            wait function but the ISR related to it fired. Ex. keyboard ISR but\
-            no thread is calling kbd_read\n");
+        // printk("PROC_unblock_head: queue or queue head is null");
+        // printk("This warning may be harmless if no thread called the blocking
+        //     wait function but the ISR related to it fired. Ex. keyboard ISR but
+        //     no thread is calling kbd_read\n");
         return;
     }
 

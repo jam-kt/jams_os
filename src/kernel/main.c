@@ -12,6 +12,8 @@
 #include <kernel/kmalloc.h>
 #include <kernel/syscall.h>
 #include <kernel/multitask.h>
+#include <kernel/block_dev.h>
+#include <kernel/ata.h>
 
 
 // static void test_worker_c(void *arg)
@@ -27,9 +29,7 @@
 
 static void kbd_io_thread(void *arg)
 {
-    printk("made into kbd thread\n");
-
-    (void)arg;
+    printk("entering kbd io thread\n");
 
     while (1) {
         int c = keyboard_getchar();
@@ -40,16 +40,86 @@ static void kbd_io_thread(void *arg)
     }
 }
 
+
+static void ata_test_thread(void *arg)
+{
+    printk("entering ATA driver test thread\n");
+
+    block_dev *hdd = ata_probe(ATA_PRIMARY_IO, ATA_MASTER, 0, 
+        "ATA PRIMARY MASTER", ATA_PRIMARY_ISR);
+
+    if (!hdd) {
+        printk("failed to detect a primary master\n");
+    }
+
+    /* begin test sequence */
+    uint8_t *buf = kmalloc(512);
+    if (!buf) {
+        return;
+    }
+
+    /* fill with junk */
+    memset(buf, 0xCC, 512);
+
+    /* test read block 0 first 16 bytes */
+    int ret = hdd->read_block(hdd, 0, buf);
+    if (ret != 0) {
+        printk("ata test failed to read block 0\n");
+    } else {
+        printk("\n--- BLOCK 0 DUMP ---\n");
+        for (int i = 0; i < 16; i++) {
+            printk("%x ", buf[i]);
+        }
+
+    }
+
+    /* test block 32 */
+    ret = hdd->read_block(hdd, 32, buf);
+    if (ret != 0) {
+        printk("ata test failed to read block 32\n");
+    } else {
+        printk("\n--- BLOCK 32 DUMP ---\n");
+        for (int i = 0; i < 16; i++) {
+            printk("%x ", buf[i]);
+        }
+
+    }
+
+    /* test block 64 */
+    ret = hdd->read_block(hdd, 64, buf);
+    if (ret != 0) {
+        printk("ata test failed to read block 64\n");
+    } else {
+        printk("\n--- BLOCK 64 DUMP ---\n");
+        for (int i = 0; i < 16; i++) {
+            printk("%x ", buf[i]);
+        }
+
+    }
+
+    printk("ATA driver test complete\n");
+    kexit();
+}
+
+
 static void kernel_init(void *arg)
 {
-    (void)arg;
-
     printk("started kernel initialization thread\n");
 
+    /* post multithreading initialization here */
+    ps2_init();
+    keyboard_init();
+
+    /* keyboard */
     PROC_create_kthread(kbd_io_thread, NULL);
 
+    /* block device / ATA */
+    PROC_create_kthread(ata_test_thread, NULL);
+
     printk("ending kernel initialization thread\n");
+    kexit();
 }
+
 
 /* kernel entry and idle thread, never block from this context */
 void kernel_main(void *mboot_header) 
@@ -60,11 +130,6 @@ void kernel_main(void *mboot_header)
     serial_init();
     syscall_init();
     multitask_init();
-
-    /* uses polling for init, no blocking */
-    ps2_init();
-    keyboard_init();
-
     parse_mboot_tags(mboot_header);
     MMU_init();
 

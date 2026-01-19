@@ -135,7 +135,7 @@ int IRQ_get_mask(int irq_line)
 
 /* 
  * signal the PIC that the IRQ has been serviced. Checks for valid vector num.
- * Must call this function after ever IRQ (vectors 32-47)
+ * Must call this function after every IRQ (vectors 32-47)
  */
 void IRQ_end_of_interrupt(uint8_t vector)
 {

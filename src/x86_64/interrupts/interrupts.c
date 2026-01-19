@@ -63,7 +63,7 @@ void interrupts_init()
 }
 
 /*
- * - vector : interrupt vector number
+ * - vector : interrupt vector number (remember to add 32 for remapped IRQs)
  * - IST    : 0 for current stack or 1-7 for an IST stack
  * - type   : interrupt or trap gate. See macros in interrupts.h
  * - handler: callback function
@@ -74,7 +74,7 @@ void register_interrupt(int vector, uint8_t IST, uint8_t type, isr_t handler, vo
     CLI();
 
     if ((vector >= NUM_ISRS) || (vector < 0) || isr_table[vector].handler) {
-        printk("Tried to register an interrupt on a bad vector: %d", vector);
+        printk("Tried to register an interrupt on a bad vector: %d\n", vector);
         return;
     }
 

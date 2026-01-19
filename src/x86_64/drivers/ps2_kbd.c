@@ -43,20 +43,16 @@ static const char map[0x3A] = {
 
 
 /* inb and outb wrappers using intel syntax */
-static inline uint8_t inb(uint16_t port)
+static inline void outb(uint16_t port, uint8_t val) 
 {
-    uint8_t ret;
-    asm volatile ("inb  %0, %1"
-                   : "=a"(ret)
-                   : "Nd"(port));
-    return ret;
+    asm volatile ("outb %1, %0" : : "a"(val), "Nd"(port));
 }
 
-static inline void outb(uint16_t port, uint8_t val)
+static inline uint8_t inb(uint16_t port) 
 {
-    asm volatile ("outb %1, %0"
-                   :
-                   : "a"(val), "Nd"(port));
+    uint8_t ret;
+    asm volatile ("inb %0, %1" : "=a"(ret) : "Nd"(port));
+    return ret;
 }
 
 /* reads a byte from the data port after wait-polling */
