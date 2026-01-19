@@ -94,10 +94,9 @@ static void ata_test_thread(void *arg)
         for (int i = 0; i < 16; i++) {
             printk("%x ", buf[i]);
         }
-
     }
 
-    printk("ATA driver test complete\n");
+    printk("\n\nATA driver test complete\n");
     kexit();
 }
 

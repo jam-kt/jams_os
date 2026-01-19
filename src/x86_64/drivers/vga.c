@@ -15,7 +15,6 @@ static int col = 0;
 static uint8_t color = FG(VGA_LIGHT_GREY) | BG(VGA_BLACK);
 
 
-/* techinically can be have race conditions */
 void vga_setcolor(uint8_t fg, uint8_t bg)
 {
     color = FG(fg) | BG(bg);

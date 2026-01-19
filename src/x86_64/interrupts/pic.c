@@ -43,8 +43,11 @@ void PIC_init()
     /* reinitialize the PIC, change vector mapping [0x00, 0x1F]->[0x20, 0x2F] */
     PIC_remap(PIC1_VECTOR, PIC2_VECTOR);
 
-    for (int i = 0; i < 15; i++) {      /* disable the IRQs by default */
-        IRQ_set_mask(i);
+    /* disable the IRQs by default but avoid masking IRQ 2 (slave cascade) */
+    for (int i = 0; i < 15; i++) {
+        if (i != 2) {
+            IRQ_set_mask(i);
+        }
     }
 }
 

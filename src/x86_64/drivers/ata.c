@@ -243,10 +243,8 @@ static int ata_read_block(block_dev *dev, uint64_t blk_num, void *dst)
         ata->req_tail = req;
     }
 
-    printk("begin ATA blocking\n");
     /* block until ISR completes the request */
     wait_event_interruptable(req->wait_queue, req->done == 1);
-
     kfree(req);
     return 0;
 }
@@ -254,15 +252,14 @@ static int ata_read_block(block_dev *dev, uint64_t blk_num, void *dst)
 
 static void ISR_ata_handler(int vector, int err, void *arg)
 {
-    printk("made into ata isr\n");
     ata_block_dev *ata = (ata_block_dev *)arg;
-
     uint8_t status = inb(ata->ata_base + REG_STATUS);
     if (status == 0) {
         return;
     }
 
     if (!(status & STATUS_DRQ)) {   /* check if data is ready */
+        printk("returning early\n");
         return;
     }
 
@@ -272,20 +269,24 @@ static void ISR_ata_handler(int vector, int err, void *arg)
         return;
     }
 
-    /* read data */
-    insw(ata->ata_base + REG_DATA, req->buffer, 256);
-
+    /* buffer existence sanity check and then read data */
+    if (!req->buffer) {
+        printk("no ATA buffer\n");
+        return;
+    } else {
+        insw(ata->ata_base + REG_DATA, req->buffer, 256);
+    }
+    
     /* request complete */
     req->done = 1;
+    ata->req_head = req->next;
     PROC_unblock_all(&req->wait_queue);
 
     /* advance ATA driver queue */
-    ata->req_head = req->next;
     if (ata->req_head == NULL) {
         ata->req_tail = NULL;
     } else {
         /* start next request */
         ata_start_request(ata, ata->req_head);
     }
-    printk("exited ata isr\n");
 }

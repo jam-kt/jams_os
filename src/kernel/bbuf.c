@@ -62,7 +62,7 @@ int bbuf_try_consume(struct bbuf_st *st, char *res)
         return -1;
     }
 
-    int enable_ints;
+    int enable_ints = 0;
     if (are_interrupts_enabled()) {
         enable_ints = 1;
         CLI();
