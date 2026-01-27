@@ -29,7 +29,23 @@ int blk_register(block_dev *dev)
     return 0;
 }
 
-block_dev *BLK_get_head(void) 
+block_dev *blk_get_head(void) 
 {
     return dev_list_head;
+}
+
+/* returns the first block device that matches the given fs_type */
+block_dev *blk_find_partiton_fstype(uint8_t fs_type) 
+{
+    block_dev *curr = blk_get_head();
+    
+    while (curr) {
+        if ((curr->type == PARTITION) && (curr->fs_type == fs_type)) {
+            return curr;
+        }
+        curr = curr->next;
+    }
+
+    printk("blk_find_partiton_type: couldn't find a partition with type: %x\n", fs_type);
+    return NULL;
 }

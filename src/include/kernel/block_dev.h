@@ -18,5 +18,6 @@ typedef struct block_dev {
 
 int blk_register(block_dev *dev);
 block_dev *blk_get_head(void);
+block_dev *blk_find_partiton_fstype(uint8_t fs_type);
 
 #endif
