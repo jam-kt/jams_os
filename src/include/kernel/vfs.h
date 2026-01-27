@@ -34,9 +34,18 @@ struct inode {
     struct superblock *sb;      /* ptr back to SB */
 
     int (*readdir)(struct inode *inode, readdir_cb cb, void *p);
-    /* For next milestone: struct file *(*open)(struct inode *inode); */
+    struct file *(*open)(struct inode *inode);
     
     void *priv_data;            /* ptr to the FS driver's private inode */
+};
+
+struct file {
+    struct inode *inode;
+    uint64_t offset;
+
+    int (*read)(struct file *f, void *buf, int len);
+    int (*lseek)(struct file *f, int offset);
+    int (*close)(struct file *f);
 };
 
 /* interface for filesystem detection function */

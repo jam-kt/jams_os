@@ -9,6 +9,8 @@
 #include <kernel/vfs.h>
 #include <kernel/ext2.h>
 
+#define MIN(a,b) (((a) < (b)) ? (a) : (b))
+
 /* internal to ext2 driver */
 typedef struct ext2_driver {
     block_dev *dev;
@@ -22,6 +24,10 @@ typedef struct ext2_driver {
 static struct inode *ext2_read_inode(struct superblock *sb, uint32_t inode_num);
 static int ext2_readdir(struct inode *inode, readdir_cb cb, void *p);
 struct superblock *ext2_probe(block_dev *dev);
+static struct file *ext2_open(struct inode *inode);
+static int ext2_file_read(struct file *f, void *buf, int len);
+static int ext2_file_lseek(struct file *f, int offset);
+static int ext2_file_close(struct file *f);
 
 void ext2_init()
 {
@@ -124,6 +130,7 @@ static struct inode *ext2_read_inode(struct superblock *sb, uint32_t inode_num)
     vnode->mode = raw_node->mode;
     vnode->sb = sb;
     vnode->readdir = ext2_readdir;
+    vnode->open = ext2_open;
     
     /* save raw inode data */
     vnode->priv_data = kmalloc(inode_size);
@@ -185,5 +192,157 @@ static int ext2_readdir(struct inode *inode, readdir_cb cb, void *p) {
     }
 
     kfree(block_buf);
+    return 0;
+}
+
+
+/* 
+ * translates file relative logical block number into a volume relative physical 
+ * block number. Currently does not support triple indirect
+ */
+static uint32_t ext2_get_block_number(struct inode *inode, uint32_t logic_blk) {
+    ext2_inode *raw_node = (ext2_inode *)inode->priv_data;
+    struct superblock *sb = inode->sb;
+    ext2_driver *drv = (ext2_driver *)sb->priv_data;
+    
+    /* ptr per block = block_size / 4 . (block indices are 4 bytes) */
+    uint32_t p = drv->block_size / 4; 
+
+    /* direct blocks (0-11) */
+    if (logic_blk < 12) {
+        return raw_node->block[logic_blk];
+    }
+    logic_blk -= 12;
+
+    /* singly indirect block (12) */
+    if (logic_blk < p) {
+        if (raw_node->block[12] == 0) {
+            return 0;
+        }
+
+        uint32_t *block_buf = kmalloc(drv->block_size);
+        ext2_read_block(drv, raw_node->block[12], block_buf);
+        
+        uint32_t phys_block = block_buf[logic_blk];
+        kfree(block_buf);
+        return phys_block;
+    }
+
+    logic_blk -= p;
+
+    /* doubly indirect block (13) */
+    if (logic_blk < (p * p)) {
+        if (raw_node->block[13] == 0) {
+            return 0; // Sparse
+        }
+
+        uint32_t idx_1 = logic_blk / p;
+        uint32_t idx_2 = logic_blk % p;
+
+        uint32_t *block_buf = kmalloc(drv->block_size);
+        
+        /* read the first level indirect block */
+        ext2_read_block(drv, raw_node->block[13], block_buf);
+        uint32_t indirect_block = block_buf[idx_1];
+        
+        if (indirect_block == 0) {
+            kfree(block_buf);
+            return 0; 
+        }
+
+        /* read the second level indirect block */
+        ext2_read_block(drv, indirect_block, block_buf);
+        uint32_t phys_block = block_buf[idx_2];
+        
+        kfree(block_buf);
+        return phys_block;
+    }
+    
+    /* no triple indirect yet, mostly just recycling logic */
+    return 0;
+}
+
+static struct file *ext2_open(struct inode *inode) {
+    struct file *f = kmalloc(sizeof(struct file));
+    if (!f) {
+        return NULL;
+    }
+
+    f->inode = inode;
+    f->offset = 0;
+    f->read = ext2_file_read;
+    f->lseek = ext2_file_lseek;
+    f->close = ext2_file_close;
+
+    return f;
+}
+
+static int ext2_file_read(struct file *f, void *buf, int len) {
+    if (!f || !f->inode) {
+        return -1;
+    }
+
+    struct inode *inode = f->inode;
+    ext2_driver *drv = (ext2_driver *)inode->sb->priv_data;
+    uint8_t *out_buf = (uint8_t *)buf;
+    
+    /* check bounds */
+    if (f->offset >= inode->size) {
+        return 0; 
+    }
+
+    if (f->offset + len > inode->size) {
+        len = inode->size - f->offset;
+    }
+
+    int bytes_read = 0;
+    void *temp_block = kmalloc(drv->block_size);
+
+    while (len > 0) {
+        /* determine block of the current offset */
+        uint32_t logical_block = f->offset / drv->block_size;
+        uint32_t block_offset = f->offset % drv->block_size;
+        
+        /* read whats available or requested, whichever is smaller */
+        uint32_t to_read = MIN(len, drv->block_size - block_offset);
+
+        uint32_t phys_block = ext2_get_block_number(inode, logical_block);
+
+        if (phys_block == 0) {
+            /* nothing in 0th block */
+            memset(out_buf, 0, to_read);
+        } else {
+            ext2_read_block(drv, phys_block, temp_block);
+            memcpy(out_buf, temp_block + block_offset, to_read);
+        }
+
+        out_buf += to_read;
+        f->offset += to_read;
+        len -= to_read;
+        bytes_read += to_read;
+    }
+
+    kfree(temp_block);
+    return bytes_read;
+}
+
+
+static int ext2_file_lseek(struct file *f, int offset) {
+    /* check bound then update offset */
+    if (offset > f->inode->size) {
+        return -1;
+    }
+
+    f->offset = offset;
+
+    return 0;
+}
+
+
+static int ext2_file_close(struct file *f) {
+    if (f) {
+        kfree(f); 
+    }
+
     return 0;
 }

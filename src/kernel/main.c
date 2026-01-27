@@ -274,6 +274,24 @@ int recursive_print_cb(const char *name, struct inode *inode, void *p) {
     }
     printk("\n");
 
+    /* look for test.txt so we can read and print contents */
+    if (strcmp(name, "test.txt") == 0 && (inode->mode & S_IFREG)) {
+        struct file *f = inode->open(inode);
+        if (f) {
+            printk("-- found test.txt file, printing contents --\n\n");
+            char buf[129];
+            int n;
+            if ((n = f->read(f, buf, 128)) > 0) {
+                buf[n] = '\0';
+                printk("%s", buf);
+            }
+            printk("\n-- finished printing contents --\n");
+            f->close(f);
+        } else {
+            printk("couldn't open text.txt\n");
+        }
+    }
+
     /* check if its a directory */
     /* ignore "." and ".." to avoid infinite loops */
     if ((inode->mode & S_IFDIR) && 
