@@ -258,8 +258,8 @@ static void ISR_ata_handler(int vector, int err, void *arg)
         return;
     }
 
+    /* mostly needed to handle the first "phantom" IRQ */
     if (!(status & STATUS_DRQ)) {   /* check if data is ready */
-        printk("returning early\n");
         return;
     }
 

@@ -3,7 +3,6 @@
 
 #include <string.h>
 #include <stdio.h>
-
 #include <kernel/vga.h>
 #include <kernel/ps2_kbd.h>
 #include <kernel/interrupts.h>
@@ -14,31 +13,12 @@
 #include <kernel/multitask.h>
 #include <kernel/block_dev.h>
 #include <kernel/ata.h>
+#include <kernel/mbr.h>
+#include <kernel/vfs.h>
+#include <kernel/ext2.h>
 
+void ls_recursive(struct inode *dir, int indent_level);
 
-// static void test_worker_c(void *arg)
-// {
-//     int id = (int)(uintptr_t)arg;
-//     int count = 0;
-//     for (int i = 0; i < 10; i++) {
-//         printk("[C%d] count=%d\n", id, count++);
-//         //dump_stack("[C]", 3);
-//         yield();
-//     }
-// }
-
-static void kbd_io_thread(void *arg)
-{
-    printk("entering kbd io thread\n");
-
-    while (1) {
-        int c = keyboard_getchar();
-        if (c == -1) {
-            continue;
-        }
-        printk("%c", (char)c);
-    }
-}
 
 
 static void ata_test_thread(void *arg)
@@ -96,10 +76,45 @@ static void ata_test_thread(void *arg)
         }
     }
 
-    printk("\n\nATA driver test complete\n");
+    printk("\n\nATA driver test complete\n\n");
+
+    /* begin testing for VFS stuff */
+    MBR_init(hdd);
+    ext2_init();
+
+    /* MBR_init should register the ext2 FS as a block device, use that now */
+    block_dev *part_dev = blk_find_partiton_fstype(EXT2_TYPE);
+    if (!part_dev) {
+        printk("error: no partitions found\n");
+        kexit();
+    }
+    
+    struct superblock *sb = fs_probe(part_dev);
+    if (!sb) {
+        kfree(hdd);
+        kexit();
+    }
+
+    ls_recursive(sb->root_inode, 0);
+
+    kfree(hdd);
+    kfree(part_dev);
     kexit();
 }
 
+
+static void kbd_io_thread(void *arg)
+{
+    printk("entering kbd io thread\n");
+
+    while (1) {
+        int c = keyboard_getchar();
+        if (c == -1) {
+            continue;
+        }
+        printk("%c", (char)c);
+    }
+}
 
 static void kernel_init(void *arg)
 {
@@ -229,4 +244,51 @@ void kernel_main(void *mboot_header)
     // for (int i = 0; i < 10; i++) {
     //     PROC_run();
     // }
+}
+
+// static void test_worker_c(void *arg)
+// {
+//     int id = (int)(uintptr_t)arg;
+//     int count = 0;
+//     for (int i = 0; i < 10; i++) {
+//         printk("[C%d] count=%d\n", id, count++);
+//         //dump_stack("[C]", 3);
+//         yield();
+//     }
+// }
+
+
+/* helpers for EXT32 read demonstration */
+int recursive_print_cb(const char *name, struct inode *inode, void *p) {
+    int indent = *(int *)p;
+    
+    /* print indentation */
+    for (int i = 0; i < indent; i++) printk("  ");
+    
+    /* print file name */
+    printk("- %s", name);
+
+    /* check for directory */
+    if (inode->mode & S_IFDIR) {
+        printk("/");
+    }
+    printk("\n");
+
+    /* check if its a directory */
+    /* ignore "." and ".." to avoid infinite loops */
+    if ((inode->mode & S_IFDIR) && 
+        strcmp(name, ".") != 0 && 
+        strcmp(name, "..") != 0) {
+            
+        /* recurse with increased indent */
+        ls_recursive(inode, indent + 1);
+    }
+    
+    return 0;
+}
+
+
+void ls_recursive(struct inode *dir, int indent_level) {
+    /* pass the indent level as the 'void *p' user data */
+    dir->readdir(dir, recursive_print_cb, &indent_level);
 }
