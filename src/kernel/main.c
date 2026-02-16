@@ -16,9 +16,10 @@
 #include <kernel/mbr.h>
 #include <kernel/vfs.h>
 #include <kernel/ext2.h>
+#include <kernel/md5.h>
 
 void ls_recursive(struct inode *dir, int indent_level);
-
+void test_fs_checksum(struct inode *root);
 
 
 static void ata_test_thread(void *arg)
@@ -260,6 +261,7 @@ void kernel_main(void *mboot_header)
 
 /* helpers for EXT32 read demonstration */
 int recursive_print_cb(const char *name, struct inode *inode, void *p) {
+    static const char hex[] = "0123456789abcdef";   // yes this is dumb
     int indent = *(int *)p;
     
     /* print indentation */
@@ -268,40 +270,42 @@ int recursive_print_cb(const char *name, struct inode *inode, void *p) {
     /* print file name */
     printk("- %s", name);
 
-    /* check for directory */
+    /* Check if it is a directory */
     if (inode->mode & S_IFDIR) {
         printk("/");
-    }
-    printk("\n");
+        printk("\n");
 
-    /* look for test.txt so we can read and print contents */
-    if (strcmp(name, "test.txt") == 0 && (inode->mode & S_IFREG)) {
+        /* Recurse: ignore "." and ".." to avoid infinite loops */
+        if (strcmp(name, ".") != 0 && strcmp(name, "..") != 0) {
+            ls_recursive(inode, indent + 1);
+        }
+    } 
+    /* Check if it is a regular file */
+    else if (inode->mode & S_IFREG) {
+        /* Open the file to compute checksum */
         struct file *f = inode->open(inode);
+        
         if (f) {
-            printk("-- found test.txt file, printing contents --\n\n");
-            char buf[129];
-            int n;
-            if ((n = f->read(f, buf, 128)) > 0) {
-                buf[n] = '\0';
-                printk("%s", buf);
+            uint8_t digest[16];
+            
+            /* Compute hash of content only */
+            md5File(f, digest);
+            
+            printk(" MD5: ");
+            for(int i = 0; i < 16; ++i){
+                char hi = hex[(digest[i] >> 4) & 0xF];
+                char lo = hex[digest[i] & 0xF];
+                printk("%c%c", hi, lo);
             }
-            printk("\n-- finished printing contents --\n");
+            
             f->close(f);
         } else {
-            printk("couldn't open text.txt\n");
+            printk(" [Error opening file]");
         }
+        
+        printk("\n");
     }
 
-    /* check if its a directory */
-    /* ignore "." and ".." to avoid infinite loops */
-    if ((inode->mode & S_IFDIR) && 
-        strcmp(name, ".") != 0 && 
-        strcmp(name, "..") != 0) {
-            
-        /* recurse with increased indent */
-        ls_recursive(inode, indent + 1);
-    }
-    
     return 0;
 }
 

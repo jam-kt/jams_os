@@ -3,5 +3,6 @@
         "memory.h": "c",
         "interrupts.h": "c",
         "string.h": "c"
-    }
+    },
+    "chatgpt.commentCodeLensEnabled": false
 }

@@ -36,6 +36,14 @@ sudo cp "$GRUB_CFG" /mnt/osfiles/boot/grub/grub.cfg
 
 echo "test file to verify the filesystem driver" | sudo tee /mnt/osfiles/test.txt > /dev/null
 
+# output some md5 checksums for filesystem read checking
+echo "MD5 checksums for some files"
+sudo md5sum /mnt/osfiles/test.txt
+sudo md5sum /mnt/osfiles/boot/kernel.img
+sudo md5sum /mnt/osfiles/boot/grub/grub.cfg
+echo "
+    "
+
 # install grub bootloader
 sudo grub-install --root-directory=/mnt/osfiles --no-floppy \
     --modules="normal part_msdos ext2 multiboot" "$LOOP_DISK"
