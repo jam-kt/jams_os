@@ -136,4 +136,5 @@ void ISR13_general_protection(int vector, int err, void *rsp)
 {
     printk("!! General Protection Fault !!\n");
     printk("Got error code: %d (%x)\n", (int)err, (int)err);
+    __asm__("hlt");
 }

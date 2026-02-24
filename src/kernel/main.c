@@ -17,6 +17,7 @@
 #include <kernel/vfs.h>
 #include <kernel/ext2.h>
 #include <kernel/md5.h>
+#include <kernel/elf64.h>
 
 void ls_recursive(struct inode *dir, int indent_level);
 void test_fs_checksum(struct inode *root);
@@ -96,7 +97,10 @@ static void ata_test_thread(void *arg)
         kexit();
     }
 
-    ls_recursive(sb->root_inode, 0);
+    // ls_recursive(sb->root_inode, 0);
+
+    /* ELF loading */
+    elf_load(sb->root_inode, "init.elf");
 
     kfree(hdd);
     kfree(part_dev);
@@ -260,7 +264,8 @@ void kernel_main(void *mboot_header)
 
 
 /* helpers for EXT32 read demonstration */
-int recursive_print_cb(const char *name, struct inode *inode, void *p) {
+int recursive_print_cb(const char *name, struct inode *inode, void *p) 
+{
     static const char hex[] = "0123456789abcdef";   // yes this is dumb
     int indent = *(int *)p;
     
@@ -310,7 +315,8 @@ int recursive_print_cb(const char *name, struct inode *inode, void *p) {
 }
 
 
-void ls_recursive(struct inode *dir, int indent_level) {
+void ls_recursive(struct inode *dir, int indent_level) 
+{
     /* pass the indent level as the 'void *p' user data */
     dir->readdir(dir, recursive_print_cb, &indent_level);
 }

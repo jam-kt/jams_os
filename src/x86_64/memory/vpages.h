@@ -1,13 +1,10 @@
 #ifndef __VPAGES_H__
 #define __VPAGES_H__
 
+#include <stdint-gcc.h>
 
 #define CREATE_MODE 1
 #define WALK_MODE   0
-
-#ifndef PAGE_SIZE
-#define PAGE_SIZE 4096
-#endif
 
 /* describes the virtual addr layout  */
 #define VA_PHYS_BASE    0x000000000000   /* slot 0  identity map */
@@ -17,11 +14,11 @@
 #define VA_USER_BASE    0x100000000000   /* slot 16 user space */
 
 /* masks / helpers */
-#define PAGE_MASK          (~(PAGE_SIZE-1))
-#define PML4_INDEX(va)     (((va) >> 39) & 0x1FF)
-#define PDP_INDEX(va)      (((va) >> 30) & 0x1FF)
-#define PD_INDEX(va)       (((va) >> 21) & 0x1FF)
-#define PT_INDEX(va)       (((va) >> 12) & 0x1FF)
+#define PAGE_MASK          (~(PAGE_SIZE - 1ULL))
+#define PML4_INDEX(va)     (((uint64_t)(va) >> 39) & 0x1FFULL)
+#define PDP_INDEX(va)      (((uint64_t)(va) >> 30) & 0x1FFULL)
+#define PD_INDEX(va)       (((uint64_t)(va) >> 21) & 0x1FFULL)
+#define PT_INDEX(va)       (((uint64_t)(va) >> 12) & 0x1FFULL)
 
 /* 
  * entries to the different page table levels (4 lvl page ta)

@@ -101,8 +101,3 @@ char *strchr(const char *s, int c)
 
     return NULL;
 }
-
-
-int customStringfun(int a, int b) {
-    return a + b;
-}

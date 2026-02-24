@@ -10,6 +10,5 @@ size_t strlen(const char *s);
 char *strncpy(char *dest, const char *src, size_t n);
 int strcmp(const char *s1, const char *s2);
 char *strchr(const char *s, int c);
-int customStringfun(int a, int b);
 
 #endif

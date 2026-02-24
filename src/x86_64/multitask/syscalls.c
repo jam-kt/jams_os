@@ -5,6 +5,7 @@
 #include <kernel/interrupts.h>
 #include <kernel/multitask.h>
 #include <kernel/syscall.h>
+#include <kernel/ps2_kbd.h>
 
 
 #define SYSCALL_ISR_VECTOR 128
@@ -15,15 +16,14 @@
 static void ISR128_syscall(int vector, int err, void *rsp);
 static void ISR129_kexit(int vector, int err, void *rsp);
 
+static uint64_t sys_getc(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, 
+    uint64_t a5, uint64_t a6);
+static uint64_t sys_putc(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, 
+    uint64_t a5, uint64_t a6);
+
 
 /* Table of syscall function pointers. Indexed using the syscall num */
 static struct syscall_entry syscall_table[NUM_SYSCALLS];
-
-
-/* 
- * in retrospect I am not sure if we need such an API for syscalls...
- * it would be possible to just have one interrupt vector for every syscall
- */
 
 /*******************************************************************************
  * SYSCALL API
@@ -42,6 +42,10 @@ void syscall_init()
      * vector and call kexit using the syscall vector on 0x80
      */
     register_interrupt(KEXIT_ISR_VECTOR_TEMP, 3, TYPE_TRAPGATE, ISR129_kexit, NULL);
+
+    /* register generic IO syscalls */
+    register_syscall(SYS_GETC_NUM, sys_getc);
+    register_syscall(SYS_PUTC_NUM, sys_putc);
 }
 
 void register_syscall(int sys_num, sys_t handler)
@@ -55,10 +59,7 @@ void register_syscall(int sys_num, sys_t handler)
 }
 
 
-/* 
- * generic syscall entry point to be registered on interrupt trap vector 0x80.
- * This should run on a different stack (no rug pull for kexit syscall)
- */
+/* generic syscall entry point to be registered on interrupt trap vector 0x80 */
 static void ISR128_syscall(int vector, int err, void *rsp)
 {
     /* use passed rsp to get syscall args from stack */
@@ -83,7 +84,8 @@ static void ISR128_syscall(int vector, int err, void *rsp)
 
     /* dispatch to the given syscall number or default to printing an error */
     if ((sys_num < NUM_SYSCALLS) && (syscall_table[sys_num].handler != NULL)) {
-        syscall_table[sys_num].handler(a1, a2, a3, a4, a5, a6);
+        /* store return into RAX */
+        regs->rax = syscall_table[sys_num].handler(a1, a2, a3, a4, a5, a6);
     } else {
         printk("the requested syscall (#%d) does not exist!\n", (int)sys_num);
         printk("halting...\n");
@@ -104,4 +106,21 @@ static void ISR129_kexit(int vector, int err, void *rsp)
         printk("kexit syscall handler not registered!\n");
         __asm__("hlt");
     }
+}
+
+/* might move these to their own file. Just generic syscalls */
+/* getc */
+static uint64_t sys_getc(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, 
+    uint64_t a5, uint64_t a6)
+{
+    return (uint64_t)keyboard_getchar();
+}
+
+/* putc */
+static uint64_t sys_putc(uint64_t c, uint64_t a2, uint64_t a3, uint64_t a4, 
+    uint64_t a5, uint64_t a6)
+{
+    /* just calls printk since putchar is not exposed */
+    printk("%c", (char)c);
+    return 0;
 }

@@ -2,12 +2,11 @@
 src_c_files := $(shell find src -type f -name '*.c')
 src_obj_files := $(patsubst %.c,build/%.o,$(src_c_files))
 
-libc_c_files  := $(shell find libc -type f -name '*.c')
-libc_obj_files:= $(patsubst %.c,build/%.o,$(libc_c_files))
-
+klibc_c_files  := $(shell find klibc -type f -name '*.c')
+klibc_obj_files:= $(patsubst %.c,build/%.o,$(klibc_c_files))
 
 # Combine all C source files.
-c_obj_files := $(src_obj_files) $(libc_obj_files)
+c_obj_files := $(src_obj_files) $(klibc_obj_files)
 
 all_asm_files := $(shell find src -type f -name '*.asm')
 asm_obj_files := $(patsubst %.asm,build/%.o,$(all_asm_files))
@@ -18,16 +17,20 @@ img := build/boot-$(arch).img
 
 CC := ~/cross/bin/$(arch)-elf-gcc
 CFLAGS := -Wall -Werror -std=gnu99 -g -c -mno-red-zone -ffreestanding
-CFLAGS += -Isrc/include -Ilibc/include -masm=intel
+CFLAGS += -Isrc/include -Iklibc/include -masm=intel
 
 linker_script := src/$(arch)/linker.ld
 grub_cfg := src/$(arch)/grub.cfg
 
 MAKE_IMAGE_SCRIPT := ./make_image.sh
 
+# userspace stuff
+user_bin := build/init.elf
+user_linker_script := userspace/user_linker.ld
+
 .PHONY: all clean run img
 
-all: $(kernel_bin)
+all: $(kernel_bin) $(user_bin)
 
 clean:
 	@rm -rf build
@@ -37,11 +40,17 @@ run: $(img)
 
 img: $(img)
 
-$(img): $(kernel_bin)
-	@$(MAKE_IMAGE_SCRIPT) $(img) $(kernel_bin) $(grub_cfg)
+$(img): $(kernel_bin) $(user_bin)
+	@$(MAKE_IMAGE_SCRIPT) $(img) $(kernel_bin) $(grub_cfg) $(user_bin)
 
 $(kernel_bin): $(asm_obj_files) $(c_obj_files) $(linker_script)
 	@ld -n -T $(linker_script) -o $(kernel_bin) $(asm_obj_files) $(c_obj_files)
+
+# Rule to compile the user-space program
+$(user_bin): userspace/init.c $(user_linker_script)
+	@mkdir -p $(dir $@)
+	$(CC) -Wall -Werror -std=gnu99 -g -mno-red-zone -ffreestanding \
+	-nostdlib -mcmodel=large -T $(user_linker_script) $< -o $@
 
 # Generic rule for compiling C files that preserves their relative path.
 build/%.o: %.c

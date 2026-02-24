@@ -6,11 +6,11 @@
 
 #define NUM_SYSCALLS 256
 
-/* callback function */
-typedef void (*sys_t) (uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+/* callback function, returns uint64_t as a generic data type */
+typedef uint64_t (*sys_t) (uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
                         uint64_t a5, uint64_t a6);
 
-/* an entry into the Syscall table */
+/* an entry into the syscall table */
 struct syscall_entry {
     sys_t handler;  /* function pointer to a specific syscall  */
 };
@@ -25,5 +25,7 @@ void register_syscall(int sys_num, sys_t handler);
 
 #define SYS_YIELD_NUM 0
 #define SYS_KEXIT_NUM 1
+#define SYS_GETC_NUM  2
+#define SYS_PUTC_NUM  3
 
 #endif

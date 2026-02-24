@@ -7,14 +7,16 @@
 #include <kernel/serial_out.h>
 
 
-static void ISR36_IRQ4_serial();
+static void ISR36_IRQ4_serial(int vector, int err, void *arg);
 
 
-#define PORT        0x3f8          // COM1
-#define LINE_INTR   (0x3 << 1)
-#define THR_INTR    (1 << 5)
+#define PORT                0x3f8          // COM1
+#define IIR_NO_PENDING      (1 << 0)
+#define IIR_MASK            0x0E
+#define IIR_THR_EMPTY       0x02
+#define LSR_THR_EMPTY       (1 << 5)
 
-#define SER_BUFFER_SIZE 1024
+#define SER_BUFFER_SIZE     2048
 
 static int ser_active = 0;
 static char ser_buf[SER_BUFFER_SIZE];
@@ -60,12 +62,12 @@ int serial_init() {
     return 0;
 }
 
-static int transmit_empty()
+static int transmit_empty(void)
 {
-    return inb(PORT + 5) & THR_INTR;
+    return inb(PORT + 5) & LSR_THR_EMPTY;
 }
 
-static void transmit()
+static void transmit(void)
 {
     int enable_ints = 0;
     if (are_interrupts_enabled()) {
@@ -73,13 +75,17 @@ static void transmit()
         CLI();
     }
 
+    /* check and clear busy status */
     if (ser_active && transmit_empty()) {
         ser_active = 0;
-    } else if (!ser_active) {
-        char res;
-        if (!bbuf_try_consume(&ser_st, &res)) {
+    }
+
+    /* attempt to send if not busy */
+    if (!ser_active) {
+        char c;
+        if (!bbuf_try_consume(&ser_st, &c)) {
             ser_active = 1;
-            outb(PORT, res);    
+            outb(PORT, c);
         }
     }
 
@@ -102,15 +108,19 @@ void serial_display_string(const char *s)
 }
 
 /* register as an interrupt gate so interrupts are disabled by default */
-static void ISR36_IRQ4_serial()
+static void ISR36_IRQ4_serial(int vector, int err, void *arg)
 {
-    /* check IIR for a LINE interrupt indicator */
-    if (!(inb(PORT + 2) & LINE_INTR)) {
+    (void)vector;
+    (void)err;
+    (void)arg;
+
+    uint8_t iir = inb(PORT + 2);
+    if (iir & IIR_NO_PENDING) {
         return;
     }
 
-    /* check LSR for a THR interrupt indicator */
-    if (inb(PORT + 5) & THR_INTR) {
+    /* only handle THR-empty interrupt cause */
+    if ((iir & IIR_MASK) == IIR_THR_EMPTY) {
         ser_active = 0;
         transmit();
     }

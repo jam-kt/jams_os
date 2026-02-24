@@ -36,7 +36,8 @@ void ext2_init()
 }
 
 
-struct superblock *ext2_probe(block_dev *dev) {
+struct superblock *ext2_probe(block_dev *dev) 
+{
     /* read 1024 bytes starting at offset 1024 (sectors 2, 3) */
     uint8_t *buf = kmalloc(1024);
     dev->read_block(dev, 2, buf);
@@ -144,7 +145,8 @@ static struct inode *ext2_read_inode(struct superblock *sb, uint32_t inode_num)
 
 
 /* given a directory inode interpret the directory content and find child */
-static int ext2_readdir(struct inode *inode, readdir_cb cb, void *p) {
+static int ext2_readdir(struct inode *inode, readdir_cb cb, void *p) 
+{
     if ((inode->mode & S_IFDIR) == 0) {
         return -1;
     } 
@@ -191,7 +193,11 @@ static int ext2_readdir(struct inode *inode, readdir_cb cb, void *p) {
                 struct inode *child = sb->read_inode(sb, dentry->inode);
                 if (child) {
                     /* callback allows us to recurse if needed */
-                    cb(name, child, p); 
+                    if(cb(name, child, p) != 0) {
+                        kfree(block_buf);
+                        return 0;
+                    }
+
                     kfree(child->priv_data);
                     kfree(child);
                 }   
@@ -212,7 +218,8 @@ static int ext2_readdir(struct inode *inode, readdir_cb cb, void *p) {
  * translates file relative logical block number into a volume relative physical 
  * block number.
  */
-static uint32_t ext2_get_block_number(struct inode *inode, uint32_t logic_blk) {
+static uint32_t ext2_get_block_number(struct inode *inode, uint32_t logic_blk) 
+{
     ext2_inode *raw_node = (ext2_inode *)inode->priv_data;
     struct superblock *sb = inode->sb;
     ext2_driver *drv = (ext2_driver *)sb->priv_data;
@@ -306,7 +313,8 @@ static uint32_t ext2_get_block_number(struct inode *inode, uint32_t logic_blk) {
     return phys_block;
 }
 
-static struct file *ext2_open(struct inode *inode) {
+static struct file *ext2_open(struct inode *inode) 
+{
     struct file *f = kmalloc(sizeof(struct file));
     if (!f) {
         return NULL;
@@ -321,7 +329,8 @@ static struct file *ext2_open(struct inode *inode) {
     return f;
 }
 
-static int ext2_file_read(struct file *f, void *buf, int len) {
+static int ext2_file_read(struct file *f, void *buf, int len) 
+{
     if (!f || !f->inode) {
         return -1;
     }
@@ -371,7 +380,8 @@ static int ext2_file_read(struct file *f, void *buf, int len) {
 }
 
 
-static int ext2_file_lseek(struct file *f, int offset) {
+static int ext2_file_lseek(struct file *f, int offset) 
+{
     /* check bound then update offset */
     if (offset > f->inode->size) {
         return -1;
@@ -383,7 +393,8 @@ static int ext2_file_lseek(struct file *f, int offset) {
 }
 
 
-static int ext2_file_close(struct file *f) {
+static int ext2_file_close(struct file *f) 
+{
     if (f) {
         kfree(f); 
     }

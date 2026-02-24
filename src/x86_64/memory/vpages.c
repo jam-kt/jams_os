@@ -26,11 +26,13 @@ static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg);
 
 
 /* helpers to convert between 40 bit page frame number and 52 bit frame addr */
-static inline uint64_t phys_to_pfn(uint64_t phys_addr) {
+static inline uint64_t phys_to_pfn(uint64_t phys_addr)
+{
     return (phys_addr >> 12);
 }
 
-static inline uint64_t pfn_to_phys(uint64_t pfn) {
+static inline uint64_t pfn_to_phys(uint64_t pfn)
+{
     return (pfn << 12);
 }
 
@@ -38,7 +40,8 @@ static inline uint64_t pfn_to_phys(uint64_t pfn) {
  * given a p4_entry return the base addr of its p3 table. If it has no p3 table
  * allocate a new frame for it and return that base address
  */ 
-static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4) {
+static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4)
+{
     if (!e4->present) {
         /* alloc new frame if table not present (error check in MMU_pf_alloc)*/
         void *frame = MMU_pf_alloc();
@@ -64,7 +67,8 @@ static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4) {
  * given a p3_entry return the base addr of its p2 table. If it has no p2 table
  * allocate a new frame for it and return that base address
  */ 
-static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3) {
+static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3) 
+{
     if (!e3->present) {
         void *frame = MMU_pf_alloc();
         if (frame == INVALID_FRAME_ADDR) {
@@ -90,7 +94,8 @@ static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3) {
  * given a p2_entry return the base addr of its p1 table. If it has no p1 table
  * allocate a new frame for it and return that base address
  */ 
-static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2) {
+static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2)
+{
     if (!e2->present) {
         void *frame = MMU_pf_alloc();
         if (frame == INVALID_FRAME_ADDR) {
@@ -116,7 +121,8 @@ static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2) {
  * with a given virtual address. if create = CREATE_MODE then the function
  * will allocate page table entries missing in the path to the virtual addr
  */
-static struct p1_entry *travel_pagetable(uint64_t va, int create) {
+static struct p1_entry *travel_pagetable(uint64_t va, int create)
+{
     uint16_t idx4 = PML4_INDEX(va);
     uint16_t idx3 = PDP_INDEX(va);
     uint16_t idx2 = PD_INDEX(va);
@@ -189,7 +195,8 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create) {
 }
 
 /* creates an identity mapping for the first 512 GB */
-static void make_identity_map(void) {
+static void make_identity_map(void)
+{
     memset(ptable_p4, 0, PAGE_SIZE);
     memset(ptable_p3_identity, 0, PAGE_SIZE);
 
@@ -216,7 +223,8 @@ static void make_identity_map(void) {
 }
 
 /* reserve a virtual page using demand paging */
-static int demand_page(uint64_t va) {
+static int demand_page(uint64_t va)
+{
     struct p1_entry *p1 = travel_pagetable(va, CREATE_MODE);
     if (p1 == INVALID_FRAME_ADDR) {
         printk("demand_page: bad p1 entry given\n");
@@ -234,7 +242,8 @@ static int demand_page(uint64_t va) {
     return 0;
 }
 
-void *MMU_alloc_page(void) {
+void *MMU_alloc_page(void)
+{
     uint64_t va = kernel_va;
     if (demand_page(va) < 0) {
         return NULL;
@@ -245,11 +254,11 @@ void *MMU_alloc_page(void) {
     return (void *)va;
 }
 
-void *MMU_alloc_pages(int num) {
+void *MMU_alloc_pages(int num)
+{
     uint64_t base = kernel_va;
     for (int i = 0; i < num; i++) {
         if (demand_page(base + i * PAGE_SIZE) < 0) {
-
             return NULL;
         }
     }
@@ -259,11 +268,29 @@ void *MMU_alloc_pages(int num) {
     return (void *)base;
 }
 
+/* only used so the ELF loader can demand a page in high mem regions */
+void *MMU_alloc_at(uint64_t vaddr, uint64_t size) 
+{
+    uint64_t base = vaddr & PAGE_MASK;
+    uint64_t end = (vaddr + size + PAGE_SIZE - 1) & PAGE_MASK;
+    int num_pages = (end - base) / PAGE_SIZE;
+
+    for (int i = 0; i < num_pages; i++) {
+        if (demand_page(base + (i * PAGE_SIZE)) < 0) {
+            printk("MMU_alloc_at: could not alloc at %p\n", (void *)vaddr);
+            return NULL;
+        }
+    }
+
+    return (void *)base;
+}
+
 /* 
  * currently the frames allocated to store the page tables are not freed. 
  * the frames that are mapped to a VA and given out are freed.
  */
-void MMU_free_page(void *vaddr) {
+void MMU_free_page(void *vaddr) 
+{
     /* get rid of inter page offset */
     uint64_t va = ((uint64_t)vaddr) & PAGE_MASK;
     struct p1_entry *p1 = travel_pagetable(va, WALK_MODE);
@@ -285,7 +312,8 @@ void MMU_free_page(void *vaddr) {
     asm volatile("invlpg [%0]" : : "r"(vaddr) : "memory");
 }
 
-void MMU_free_pages(void *vaddr, int num) {
+void MMU_free_pages(void *vaddr, int num) 
+{
     uint64_t base = ((uint64_t)vaddr) & PAGE_MASK;
     for (int i = 0; i < num; i++) {
         MMU_free_page((void *)(base + i * PAGE_SIZE));
@@ -293,7 +321,8 @@ void MMU_free_pages(void *vaddr, int num) {
 }
 
 /* TLB should automatically flush after a page fault */
-static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg) {
+static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg) 
+{
     uint64_t fault_va, cr3;
     
     /* find the VA that caused the page fault */
@@ -334,13 +363,15 @@ static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg) {
     }
 }
 
-void MMU_init(void) {
+void MMU_init(void)
+{
     make_identity_map();
     kernel_va = VA_KHEAP_BASE;
     register_interrupt(14, 0, TYPE_TRAPGATE, ISR14_PAGE_FAULT_HANDLER, NULL);
 }
 
-void MMU_test(void) {
+void MMU_test(void)
+{
     printk("--- Running MMU tests ---\n");
 
     printk("Allocating single page");

@@ -22,9 +22,9 @@ static process_st main_proc;
 static uint64_t next_pid = 1;
 static int multitask_started = 0;
 
-static void syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+static uint64_t syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
                           uint64_t a5, uint64_t a6);
-static void syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+static uint64_t syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
                           uint64_t a5, uint64_t a6);
 static void kthread_start(kproc_t entry, void *arg);
 static uintptr_t align_down(uintptr_t addr, size_t align);
@@ -55,8 +55,8 @@ void kexit(void)
     asm volatile("int 0x81" : "+a"(nr) :: "memory");
 }
 
-void syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
-                    uint64_t a5, uint64_t a6)
+uint64_t syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+    uint64_t a5, uint64_t a6)
 {
     (void)a1;
     (void)a2;
@@ -65,10 +65,12 @@ void syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
     (void)a5;
     (void)a6;
     PROC_reschedule();
+
+    return 0;
 }
 
-static void syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
-                          uint64_t a5, uint64_t a6)
+static uint64_t syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, 
+    uint64_t a4, uint64_t a5, uint64_t a6)
 {
     (void)a1;
     (void)a2;
@@ -78,7 +80,7 @@ static void syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
     (void)a6;
 
     if (curr_proc == NULL) {
-        return;
+        return 1;
     }
 
     proc exiting = curr_proc;
@@ -99,6 +101,8 @@ static void syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
     }
 
     PROC_reschedule();
+
+    return 0;
 }
 
 void PROC_run(void)

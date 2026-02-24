@@ -7,11 +7,6 @@
 void *MMU_pf_alloc();
 void MMU_pf_free(void *pf);
 
-
-#ifndef PAGE_SIZE
-#define PAGE_SIZE 4096
-#endif
-
 /* regions describe entire ranges of addresses, should not be many of them */
 #define MAX_REGIONS 64
 #define INVALID_FRAME_ADDR ((void *)0xDEADBEEF)
