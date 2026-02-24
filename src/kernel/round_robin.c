@@ -38,7 +38,8 @@ static struct scheduler rr_publish = {
 scheduler round_robin = &rr_publish;
 
 
-static void rr_admit(proc new) {
+static void rr_admit(proc new)
+{
     int ints_enabled = are_interrupts_enabled();
     if (ints_enabled) {
         CLI();
@@ -67,7 +68,8 @@ static void rr_admit(proc new) {
 }
 
 
-static void rr_remove(proc victim) {
+static void rr_remove(proc victim)
+{
     int ints_enabled = are_interrupts_enabled();
     if (ints_enabled) {
         CLI();
@@ -136,7 +138,8 @@ enable_and_return:
 }
 
 
-static proc rr_next() {
+static proc rr_next()
+{
     int ints_enabled = are_interrupts_enabled();
     if (ints_enabled) {
         CLI();
@@ -161,6 +164,7 @@ static proc rr_next() {
 }
 
 
-static int rr_qlen(void) {
+static int rr_qlen(void)
+{
     return Count;
 }

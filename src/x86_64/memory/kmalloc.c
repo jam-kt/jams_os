@@ -42,7 +42,8 @@ static struct kmalloc_pool pools[NUM_POOLS] = {
 
 
 /* increase the size of a pool by allocating a new virtual page (like brk) */
-static void expand_pool(struct kmalloc_pool *pool) {
+static void expand_pool(struct kmalloc_pool *pool)
+{
     char *page = MMU_alloc_page();
     if (page == NULL) {
         return;
@@ -59,7 +60,8 @@ static void expand_pool(struct kmalloc_pool *pool) {
     pool->avail += num_blocks;
 }
 
-void *kmalloc(size_t size) {
+void *kmalloc(size_t size)
+{
     if (size == 0) {
         return NULL;
     }
@@ -110,7 +112,8 @@ void *kmalloc(size_t size) {
  * note that the freed blocks within a pool are marked as available but never
  * freed back to the OS. A pool can expand but it cannot shrink.
  */
-void kfree(void *addr) {
+void kfree(void *addr)
+{
     if (addr == NULL) {
         return;
     }
