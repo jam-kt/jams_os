@@ -245,6 +245,14 @@ static int ata_read_block(block_dev *dev, uint64_t blk_num, void *dst)
 
     /* block until ISR completes the request */
     wait_event_interruptable(req->wait_queue, req->done == 1);
+
+    /* if there is another request, start it */
+    CLI();
+    if (ata->req_head != NULL && ata->req_head == req->next) {
+        ata_start_request(ata, ata->req_head);
+    }
+    STI();
+
     kfree(req);
     return 0;
 }
@@ -280,13 +288,11 @@ static void ISR_ata_handler(int vector, int err, void *arg)
     /* request complete */
     req->done = 1;
     ata->req_head = req->next;
-    PROC_unblock_all(&req->wait_queue);
 
     /* advance ATA driver queue */
     if (ata->req_head == NULL) {
         ata->req_tail = NULL;
-    } else {
-        /* start next request */
-        ata_start_request(ata, ata->req_head);
     }
+
+    PROC_unblock_all(&req->wait_queue);
 }
