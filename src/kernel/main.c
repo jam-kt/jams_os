@@ -159,8 +159,12 @@ void kernel_main(void *mboot_header)
     while (1) {
         PROC_run();             /* check for other runnable threads in sched */
 
+        CLI();
         if (num_proc_runnable() <= 1) {
+            asm volatile("sti");
             asm volatile("hlt");    /* halts until an ISR unblocks a thread  */
+        } else {
+            STI();
         }
     }
 
@@ -265,7 +269,7 @@ void kernel_main(void *mboot_header)
 /* helpers for EXT32 read demonstration */
 int recursive_print_cb(const char *name, struct inode *inode, void *p) 
 {
-    // static const char hex[] = "0123456789abcdef";   // yes this is dumb
+    static const char hex[] = "0123456789abcdef";   // yes this is dumb
     int indent = *(int *)p;
     
     /* print indentation */
@@ -286,30 +290,30 @@ int recursive_print_cb(const char *name, struct inode *inode, void *p)
     } 
     /* Check if it is a regular file */
     else if (inode->mode & S_IFREG) {
-        // /* Open the file to compute checksum */
-        // struct file *f = inode->open(inode);
-        // uint8_t *buf = kmalloc(4096);
+        /* Open the file to compute checksum */
+        struct file *f = inode->open(inode);
+        uint8_t *buf = kmalloc(4096);
         
-        // if (f) {
-        //     // uint8_t digest[16];
+        if (f) {
+            uint8_t digest[16];
             
-        //     // /* Compute hash of content only */
-        //     // md5File(f, digest);
+            /* Compute hash of content only */
+            md5File(f, digest);
             
-        //     // printk(" MD5: ");
-        //     // for(int i = 0; i < 16; ++i){
-        //     //     char hi = hex[(digest[i] >> 4) & 0xF];
-        //     //     char lo = hex[digest[i] & 0xF];
-        //     //     printk("%c%c", hi, lo);
-        //     // }
+            printk(" MD5: ");
+            for(int i = 0; i < 16; ++i){
+                char hi = hex[(digest[i] >> 4) & 0xF];
+                char lo = hex[digest[i] & 0xF];
+                printk("%c%c", hi, lo);
+            }
 
-        //     while (f->read(f, buf, 4096) > 0);
+            while (f->read(f, buf, 4096) > 0);
             
-        //     f->close(f);
-        //     kfree(buf);
-        // } else {
-        //     printk(" [Error opening file]");
-        // }
+            f->close(f);
+            kfree(buf);
+        } else {
+            printk(" [Error opening file]");
+        }
         
         printk("\n");
     }
