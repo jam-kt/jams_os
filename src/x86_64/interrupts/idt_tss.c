@@ -97,24 +97,22 @@ void switch_mmu_and_tss(proc next)
 {
     if (!next) {
         return;
-    } else {
-        
     }
-    /* update TSS RSP0 to use the proc's unique kernel stack */
-    uintptr_t kstack_top = (uintptr_t)next->state.rsp;
-    // tss.rsp0 = (uint64_t)kstack_top;
-    kstack_top--;
-    // if (next->kstack) {
-    //     uintptr_t kstack_top = (uintptr_t)next->state.rsp;
-    //     kstack_top--;
-    // }
+
+    /* update TSS RSP0 to use the proc's unique kernel stack, RSP0 is only used
+     * when the CPU changes permission levels and IST = 0
+     */
+    if (next->kstack) {
+        uintptr_t kstack_top = (uintptr_t)next->kstack + DEFAULT_STACK_BYTES;
+        tss.rsp0 = (uint64_t)kstack_top;
+    }
 
     /* if the next proc is a user proc, update CR3 reg to point to the proc's 
      * unique page table. Note that kernel threads will have their cr3 field = 0 
      * so the check will fail and we will keep the same ptr in cr3
      */
-    // if (next->cr3) {
-    //     asm volatile("mov cr3, %0" : : "r" (next->cr3) : "memory");
-    // }
-    
+    if (next->cr3) {
+        asm volatile("mov cr3, %0" : : "r" (next->cr3) : "memory");
+    } 
+
 }

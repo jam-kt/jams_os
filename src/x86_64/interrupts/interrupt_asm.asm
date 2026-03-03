@@ -41,20 +41,20 @@ isr_handler:
 
     ; compare curr and next processes and context switch if they are different
     mov rbx, [rel curr_proc]    ; load ptr to curr_proc using RIP relative mode
-    mov rax, [rel next_proc]
-    test rax, rax               ; if next_proc == NULL skip context switch
+    mov r12, [rel next_proc]
+    test r12, r12               ; if next_proc == NULL skip context switch
     jz  .restore
-    cmp rax, rbx                ; if curr == next proc skip context switch
+    cmp r12, rbx                ; if curr == next proc skip context switch
     je  .restore               
     test rbx, rbx               ; check if curr_proc == NULL, happens on kexit
     jz  .swap_context
 
     mov [rbx + PROC_STATE_RSP_OFFSET], rsp  ; save sp into curr's context struct
 .swap_context:
-    mov rdi, rax                            ; to pass next_proc to function
+    mov rdi, r12                            ; to pass next_proc to function
     call switch_mmu_and_tss                 ; see idt_tss.c
-    mov rsp, [rax + PROC_STATE_RSP_OFFSET]  ; move next's sp into RSP
-    mov [rel curr_proc], rax                ; curr_proc = next_proc
+    mov rsp, [r12 + PROC_STATE_RSP_OFFSET]  ; move next's sp into RSP
+    mov [rel curr_proc], r12                ; curr_proc = next_proc
     mov qword [rel next_proc], 0            ; next_proc = 0
 
 .restore:
