@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <kernel/interrupts.h>
+#include <kernel/multitask.h>
 
 #include "idt_tss.h"
 
@@ -85,4 +86,35 @@ void tss_init()
     tss_desc->reserved = 0;
 
     asm volatile ("ltr %0" : : "r"((uint16_t)TSS_DESC_CS));
+}
+
+/* 
+ * used in interrupt_asm.asm to handle user space context swapping tricks.
+ * We update the TSS to ensure all user procs use their unique kernel thread
+ * while we update cr3 to ensure each user proc has a unique address space
+ */
+void switch_mmu_and_tss(proc next)
+{
+    if (!next) {
+        return;
+    } else {
+        
+    }
+    /* update TSS RSP0 to use the proc's unique kernel stack */
+    uintptr_t kstack_top = (uintptr_t)next->state.rsp;
+    // tss.rsp0 = (uint64_t)kstack_top;
+    kstack_top--;
+    // if (next->kstack) {
+    //     uintptr_t kstack_top = (uintptr_t)next->state.rsp;
+    //     kstack_top--;
+    // }
+
+    /* if the next proc is a user proc, update CR3 reg to point to the proc's 
+     * unique page table. Note that kernel threads will have their cr3 field = 0 
+     * so the check will fail and we will keep the same ptr in cr3
+     */
+    // if (next->cr3) {
+    //     asm volatile("mov cr3, %0" : : "r" (next->cr3) : "memory");
+    // }
+    
 }

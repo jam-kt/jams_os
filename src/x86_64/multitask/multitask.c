@@ -9,11 +9,12 @@
 #include <kernel/scheduler.h>
 #include <kernel/multitask.h>
 
-#define DEFAULT_STACK_BYTES (8 * 1024 * 1024)   /* binary 8MB */
 #define x86_64_ALIGNMENT 16                     /* cpu happy  */   
-#define KERNEL_CS 0x08
+#define KERNEL_CS 0x08                          /* see boot.asm GDT layout */
 #define DEFAULT_RFLAGS 0x202
-
+#define USER_CS 0x20                            /* see boot.asm GDT layout */
+#define USER_DS 0x18
+#define USER_RPL 3
 
 static scheduler sched = NULL;
 proc curr_proc = NULL;
@@ -26,7 +27,7 @@ static uint64_t syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4
                           uint64_t a5, uint64_t a6);
 static uint64_t syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
                           uint64_t a5, uint64_t a6);
-static void kthread_start(kproc_t entry, void *arg);
+static void thread_start(kproc_t entry, void *arg);
 static uintptr_t align_down(uintptr_t addr, size_t align);
 
 static void enqueue(proc_queue *q, proc p);
@@ -92,8 +93,8 @@ static uint64_t syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3,
     sched->remove(exiting);
     curr_proc = NULL;
 
-    if (exiting->stack) {
-        kfree(exiting->stack);
+    if (exiting->kstack) {
+        kfree(exiting->kstack);
     }
 
     if (exiting != &main_proc) {
@@ -110,6 +111,8 @@ void PROC_run(void)
     if (!multitask_started) {
         memset(&main_proc, 0, sizeof(main_proc));
         main_proc.pid = 0;
+        main_proc.kstack = 0;
+        main_proc.cr3 = 0;
         sched->admit(&main_proc);
         curr_proc = &main_proc;
         next_proc = &main_proc;
@@ -142,7 +145,7 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
     }
 
     new_proc->pid = next_pid++;
-    new_proc->stack = stack;
+    new_proc->kstack = stack;
     new_proc->stacksize = DEFAULT_STACK_BYTES;
 
     /* sp var serves as the stack pointer (high addr) of stack */
@@ -158,7 +161,7 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
     *--stack_top = (uint64_t)sp;    /* RSP (Points to the top of the stack) */
     *--stack_top = DEFAULT_RFLAGS;
     *--stack_top = KERNEL_CS;
-    *--stack_top = (uint64_t)kthread_start; /* set RIP to a trampoline */
+    *--stack_top = (uint64_t)thread_start; /* set RIP to a trampoline */
 
     /* "pushing" nothing for err and vector to mimic interrupt stub behavior */
     *--stack_top = 0; /* error code */
@@ -186,6 +189,77 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
     sched->admit(new_proc);
 }
 
+void PROC_create_uthread(kproc_t entry_point, void *arg)
+{
+    if (!entry_point) {
+        return;
+    }
+
+    proc new_proc = kmalloc(sizeof(*new_proc));
+    if (!new_proc) {
+        printk("PROC_create_uthread: failed to allocate proc\n");
+        return;
+    }
+
+    memset(new_proc, 0, sizeof(*new_proc));
+
+    /* stack var serves as the base (low addr) of stack */
+    void *kstack = kmalloc(DEFAULT_STACK_BYTES);
+    void *ustack = kmalloc(DEFAULT_STACK_BYTES);
+    if (!kstack || !ustack) {
+        printk("PROC_create_uthread: failed to allocate stack\n");
+        kfree(new_proc);
+        return;
+    }
+
+    new_proc->pid = next_pid++;
+    new_proc->kstack = kstack;
+    new_proc->ustack = ustack;
+    new_proc->stacksize = DEFAULT_STACK_BYTES;
+
+    // new_proc->cr3 = MMU_create_user_p4();
+
+    /* sp vars serve as the stack pointers (high addr) of stacks */
+    uintptr_t ksp = (uintptr_t)kstack + DEFAULT_STACK_BYTES;
+    ksp = align_down(ksp, x86_64_ALIGNMENT);
+    uint64_t *kstack_top = (uint64_t *)ksp;
+
+    uintptr_t usp = (uintptr_t)ustack + DEFAULT_STACK_BYTES;
+    usp = align_down(ksp, x86_64_ALIGNMENT);
+
+    /* "pushing" what is normall saved on an interrupt (restored by iretq)  */
+    *--kstack_top = USER_DS | USER_RPL;         /* SS */
+    *--kstack_top = (uint64_t)usp;              /* RSP (to the user stack) */
+    *--kstack_top = DEFAULT_RFLAGS;
+    *--kstack_top = USER_CS | USER_RPL;
+    *--kstack_top = (uint64_t)thread_start;    /* set RIP to a trampoline */
+
+    /* "pushing" nothing for err and vector to mimic interrupt stub behavior */
+    *--kstack_top = 0; /* error code */
+    *--kstack_top = 0; /* vector */
+
+    /* "push" rest of context registers */
+    *--kstack_top = 0;                       /* rax */
+    *--kstack_top = 0;                       /* rcx */
+    *--kstack_top = 0;                       /* rdx */
+    *--kstack_top = (uint64_t)arg;           /* rsi */
+    *--kstack_top = (uint64_t)entry_point;   /* rdi */
+    *--kstack_top = 0;                       /* r8  */
+    *--kstack_top = 0;                       /* r9  */
+    *--kstack_top = 0;                       /* r10 */
+    *--kstack_top = 0;                       /* r11 */
+    *--kstack_top = 0;                       /* rbx */
+    *--kstack_top = 0;                       /* rbp */
+    *--kstack_top = 0;                       /* r12 */
+    *--kstack_top = 0;                       /* r13 */
+    *--kstack_top = 0;                       /* r14 */
+    *--kstack_top = 0;                       /* r15 */
+
+    new_proc->state.rsp = (unsigned long)kstack_top;
+
+    sched->admit(new_proc);
+}
+
 void PROC_reschedule(void)
 {
     proc candidate = sched->next();
@@ -208,7 +282,7 @@ void PROC_reschedule(void)
     next_proc = candidate;
 }
 
-static void kthread_start(kproc_t entry, void *arg)
+static void thread_start(kproc_t entry, void *arg)
 {
     entry(arg);
     printk("A thread fell out of their function, calling kexit on thread\n");

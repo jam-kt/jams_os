@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint-gcc.h>
 
+#define DEFAULT_STACK_BYTES (8 * 1024 * 1024)   /* binary 8MB */
+
 typedef void (*kproc_t)(void *);
 
 void yield(void);
@@ -11,9 +13,11 @@ void kexit(void);
 void multitask_init();
 void PROC_run(void);
 void PROC_create_kthread(kproc_t entry_point, void *arg);
+void PROC_create_uthread(kproc_t entry_point, void *arg);
 void PROC_reschedule(void);
 
 
+/* unused right now, maybe we can use it to clean up code later */
 typedef struct __attribute__ ((aligned(16))) __attribute__ ((packed)) regs {
     uint64_t rax;            /* the sixteen architecturally-visible regs. */
     uint64_t rbx;
@@ -37,16 +41,18 @@ typedef struct __attribute__ ((aligned(16))) __attribute__ ((packed)) regs {
 
 typedef struct process_st *proc;
 typedef struct process_st {
-    uint64_t      pid;            /* lightweight process id  */
-    uint64_t      *stack;         /* Base of allocated stack */
-    size_t        stacksize;      /* Size of allocated stack */
-    rfile         state;          /* saved registers         */
-    uint32_t      status;         /* exited? exit status?    */
-    proc          lib_one;        /* Two pointers reserved   */
-    proc          lib_two;        /* for use by the library  */
-    proc          sched_one;      /* Two more for            */
-    proc          sched_two;      /* schedulers to use       */
-    proc          exited;         /* and one for lwp_wait()  */
+    uint64_t    pid;            /* lightweight process id  */
+    uint64_t    *kstack;        /* Base of kernel stack    */
+    uint64_t    *ustack;        /* Base of user stack      */
+    size_t      stacksize;      /* Size of the two stack   */
+    uint64_t    cr3;            /* addr of user P4 table   */
+    rfile       state;          /* saved registers         */
+    uint32_t    status;         /* exited? exit status?    */
+    proc        lib_one;        /* Two pointers reserved   */
+    proc        lib_two;        /* for use by the library  */
+    proc        sched_one;      /* Two more for            */
+    proc        sched_two;      /* schedulers to use       */
+    proc        exited;         /* and one for lwp_wait()  */
 } process_st;
 
 

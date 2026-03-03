@@ -4,7 +4,9 @@ extern c_isr_handler
 extern curr_proc
 extern next_proc
 
-%define PROC_STATE_RSP_OFFSET 88 ; offset for RSP field (proc->state.rsp)
+extern switch_mmu_and_tss
+
+%define PROC_STATE_RSP_OFFSET 104 ; offset for RSP field (proc->state.rsp)
 
 section .text
 bits 64
@@ -49,6 +51,8 @@ isr_handler:
 
     mov [rbx + PROC_STATE_RSP_OFFSET], rsp  ; save sp into curr's context struct
 .swap_context:
+    mov rdi, rax                            ; to pass next_proc to function
+    call switch_mmu_and_tss                 ; see idt_tss.c
     mov rsp, [rax + PROC_STATE_RSP_OFFSET]  ; move next's sp into RSP
     mov [rel curr_proc], rax                ; curr_proc = next_proc
     mov qword [rel next_proc], 0            ; next_proc = 0
