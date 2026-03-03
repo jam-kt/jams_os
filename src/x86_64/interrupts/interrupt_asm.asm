@@ -40,16 +40,16 @@ isr_handler:
     call c_isr_handler      ; c_irq_handler(int irq, unsigned err)
 
     ; compare curr and next processes and context switch if they are different
-    mov rbx, [rel curr_proc]    ; load ptr to curr_proc using RIP relative mode
+    mov r13, [rel curr_proc]    ; load ptr to curr_proc using RIP relative mode
     mov r12, [rel next_proc]
     test r12, r12               ; if next_proc == NULL skip context switch
     jz  .restore
-    cmp r12, rbx                ; if curr == next proc skip context switch
+    cmp r12, r13                ; if curr == next proc skip context switch
     je  .restore               
-    test rbx, rbx               ; check if curr_proc == NULL, happens on kexit
+    test r13, r13               ; check if curr_proc == NULL, happens on kexit
     jz  .swap_context
 
-    mov [rbx + PROC_STATE_RSP_OFFSET], rsp  ; save sp into curr's context struct
+    mov [r13 + PROC_STATE_RSP_OFFSET], rsp  ; save sp into curr's context struct
 .swap_context:
     mov rdi, r12                            ; to pass next_proc to function
     call switch_mmu_and_tss                 ; see idt_tss.c

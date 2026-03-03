@@ -85,6 +85,14 @@ void elf_load(struct inode *root, const char *filename)
 
     printk("ELF: entry point: %p\n", (void *)header.prog_entry_pos);
 
+    /* writing the segments into the user proc's VA space requires us to make 
+     * and switch page tables here
+     */
+    uint64_t kernel_cr3;
+    asm volatile("mov %0, cr3" : "=r" (kernel_cr3));
+    uint64_t user_cr3 = MMU_create_user_p4();
+    asm volatile("mov cr3, %0" : : "r" (user_cr3) : "memory");
+
     /* load segments */
     current_ph_pos = header.prog_table_pos;
 
@@ -128,7 +136,10 @@ void elf_load(struct inode *root, const char *filename)
     f->close(f);
 
     /* start the new kernel thread */
-    PROC_create_kthread((kproc_t)header.prog_entry_pos, NULL);
+    PROC_create_uthread((kproc_t)header.prog_entry_pos, NULL, user_cr3);
+
+    /* restore the kernel's page table */
+    asm volatile("mov cr3, %0" : : "r" (kernel_cr3) : "memory");
     
     printk("ELF: process started successfully\n");
 }

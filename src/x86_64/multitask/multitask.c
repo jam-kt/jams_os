@@ -6,14 +6,15 @@
 #include <kernel/interrupts.h>
 #include <kernel/kmalloc.h>
 #include <kernel/syscall.h>
+#include <kernel/memory.h>
 #include <kernel/scheduler.h>
 #include <kernel/multitask.h>
 
 #define x86_64_ALIGNMENT 16                     /* cpu happy  */   
 #define KERNEL_CS 0x08                          /* see boot.asm GDT layout */
 #define DEFAULT_RFLAGS 0x202
-#define USER_CS 0x20                            /* see boot.asm GDT layout */
-#define USER_DS 0x18
+#define USER_CS 0x18                            /* see boot.asm GDT layout */
+#define USER_DS 0x20
 #define USER_RPL 3
 
 static scheduler sched = NULL;
@@ -96,6 +97,9 @@ static uint64_t syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3,
     if (exiting->kstack) {
         kfree(exiting->kstack);
     }
+    // if (exiting->ustack) {
+    //     kfree(exiting->ustack);
+    // }
 
     if (exiting != &main_proc) {
         kfree(exiting);
@@ -110,9 +114,6 @@ void PROC_run(void)
 {
     if (!multitask_started) {
         memset(&main_proc, 0, sizeof(main_proc));
-        main_proc.pid = 0;
-        main_proc.kstack = 0;
-        main_proc.cr3 = 0;
         sched->admit(&main_proc);
         curr_proc = &main_proc;
         next_proc = &main_proc;
@@ -189,7 +190,10 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
     sched->admit(new_proc);
 }
 
-void PROC_create_uthread(kproc_t entry_point, void *arg)
+/* a new user page table must be created and passed through arg 3.
+ * The calling context for this function must temporarily use that page table
+ */
+void PROC_create_uthread(kproc_t entry_point, void *arg, uint64_t cr3)
 {
     if (!entry_point) {
         return;
@@ -205,7 +209,7 @@ void PROC_create_uthread(kproc_t entry_point, void *arg)
 
     /* stack var serves as the base (low addr) of stack */
     void *kstack = kmalloc(DEFAULT_STACK_BYTES);
-    void *ustack = kmalloc(DEFAULT_STACK_BYTES);
+    void *ustack = MMU_alloc_at(VA_USTACK_BASE, DEFAULT_STACK_BYTES);
     if (!kstack || !ustack) {
         printk("PROC_create_uthread: failed to allocate stack\n");
         kfree(new_proc);
@@ -216,8 +220,7 @@ void PROC_create_uthread(kproc_t entry_point, void *arg)
     new_proc->kstack = kstack;
     new_proc->ustack = ustack;
     new_proc->stacksize = DEFAULT_STACK_BYTES;
-
-    // new_proc->cr3 = MMU_create_user_p4();
+    new_proc->cr3 = cr3;
 
     /* sp vars serve as the stack pointers (high addr) of stacks */
     uintptr_t ksp = (uintptr_t)kstack + DEFAULT_STACK_BYTES;
@@ -225,14 +228,14 @@ void PROC_create_uthread(kproc_t entry_point, void *arg)
     uint64_t *kstack_top = (uint64_t *)ksp;
 
     uintptr_t usp = (uintptr_t)ustack + DEFAULT_STACK_BYTES;
-    usp = align_down(ksp, x86_64_ALIGNMENT);
+    usp = align_down(usp, x86_64_ALIGNMENT);
 
     /* "pushing" what is normall saved on an interrupt (restored by iretq)  */
     *--kstack_top = USER_DS | USER_RPL;         /* SS */
     *--kstack_top = (uint64_t)usp;              /* RSP (to the user stack) */
     *--kstack_top = DEFAULT_RFLAGS;
     *--kstack_top = USER_CS | USER_RPL;
-    *--kstack_top = (uint64_t)thread_start;    /* set RIP to a trampoline */
+    *--kstack_top = (uint64_t)entry_point;      /* no trampoline */
 
     /* "pushing" nothing for err and vector to mimic interrupt stub behavior */
     *--kstack_top = 0; /* error code */
@@ -242,8 +245,8 @@ void PROC_create_uthread(kproc_t entry_point, void *arg)
     *--kstack_top = 0;                       /* rax */
     *--kstack_top = 0;                       /* rcx */
     *--kstack_top = 0;                       /* rdx */
-    *--kstack_top = (uint64_t)arg;           /* rsi */
-    *--kstack_top = (uint64_t)entry_point;   /* rdi */
+    *--kstack_top = 0;                       /* rsi */
+    *--kstack_top = (uint64_t)arg;           /* rdi */
     *--kstack_top = 0;                       /* r8  */
     *--kstack_top = 0;                       /* r9  */
     *--kstack_top = 0;                       /* r10 */
@@ -285,7 +288,7 @@ void PROC_reschedule(void)
 static void thread_start(kproc_t entry, void *arg)
 {
     entry(arg);
-    printk("A thread fell out of their function, calling kexit on thread\n");
+    printk("A kernel thread fell off, calling kexit on thread\n");
     kexit();
 }
 

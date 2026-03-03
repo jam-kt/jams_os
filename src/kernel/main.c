@@ -97,7 +97,7 @@ static void ata_test_thread(void *arg)
         kexit();
     }
 
-    ls_recursive(sb->root_inode, 0);
+    // ls_recursive(sb->root_inode, 0);
 
     /* ELF loading */
     elf_load(sb->root_inode, "init.elf");
@@ -107,18 +107,18 @@ static void ata_test_thread(void *arg)
 }
 
 
-static void kbd_io_thread(void *arg)
-{
-    printk("entering kbd io thread\n");
+// static void kbd_io_thread(void *arg)
+// {
+//     printk("entering kbd io thread\n");
 
-    while (1) {
-        int c = keyboard_getchar();
-        if (c == -1) {
-            continue;
-        }
-        printk("%c", (char)c);
-    }
-}
+//     while (1) {
+//         int c = keyboard_getchar();
+//         if (c == -1) {
+//             continue;
+//         }
+//         printk("%c", (char)c);
+//     }
+// }
 
 static void kernel_init(void *arg)
 {
@@ -128,8 +128,8 @@ static void kernel_init(void *arg)
     ps2_init();
     keyboard_init();
 
-    /* keyboard */
-    PROC_create_kthread(kbd_io_thread, NULL);
+    // /* keyboard */
+    // PROC_create_kthread(kbd_io_thread, NULL);
 
     /* block device / ATA */
     PROC_create_kthread(ata_test_thread, NULL);

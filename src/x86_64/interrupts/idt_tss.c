@@ -104,7 +104,7 @@ void switch_mmu_and_tss(proc next)
      */
     if (next->kstack) {
         uintptr_t kstack_top = (uintptr_t)next->kstack + DEFAULT_STACK_BYTES;
-        tss.rsp0 = (uint64_t)kstack_top;
+        tss.rsp0 = (uint64_t)kstack_top & ~(16 - 1);    /* align */
     }
 
     /* if the next proc is a user proc, update CR3 reg to point to the proc's 

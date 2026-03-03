@@ -10,7 +10,7 @@
 #include "vpages.h"
 
 
-/* top level page table and one p3 table for the identity map */
+/* kernel space page table and one p3 table for the identity map */
 static struct p4_entry ptable_p4[512] __attribute__((aligned(4096)));
 static struct p3_entry ptable_p3_identity[512] __attribute__((aligned(4096)));
 
@@ -19,9 +19,9 @@ static uint64_t kernel_va = VA_KHEAP_BASE;
 
 
 static struct p1_entry *travel_pagetable(uint64_t va, int create);
-static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2);
-static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3);
-static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4);
+static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2, int user);
+static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3, int user);
+static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4, int user);
 static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg);
 
 
@@ -40,7 +40,7 @@ static inline uint64_t pfn_to_phys(uint64_t pfn)
  * given a p4_entry return the base addr of its p3 table. If it has no p3 table
  * allocate a new frame for it and return that base address
  */ 
-static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4)
+static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4, int user)
 {
     if (!e4->present) {
         /* alloc new frame if table not present (error check in MMU_pf_alloc)*/
@@ -54,7 +54,7 @@ static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4)
         e4->p3_addr     = phys_to_pfn((uint64_t)frame);
         e4->present     = 1;
         e4->rw          = 1;
-        e4->us          = 0;
+        e4->us          = user ? 1 : 0;
         e4->allocated   = 1;
     }
 
@@ -67,7 +67,7 @@ static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4)
  * given a p3_entry return the base addr of its p2 table. If it has no p2 table
  * allocate a new frame for it and return that base address
  */ 
-static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3) 
+static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3, int user) 
 {
     if (!e3->present) {
         void *frame = MMU_pf_alloc();
@@ -80,7 +80,7 @@ static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3)
         e3->p2_addr     = phys_to_pfn((uint64_t)frame);
         e3->present     = 1;
         e3->rw          = 1;
-        e3->us          = 0;
+        e3->us          = user ? 1 : 0;
         e3->big_page    = 0;
         e3->allocated   = 1;
     }
@@ -94,7 +94,7 @@ static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3)
  * given a p2_entry return the base addr of its p1 table. If it has no p1 table
  * allocate a new frame for it and return that base address
  */ 
-static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2)
+static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2, int user)
 {
     if (!e2->present) {
         void *frame = MMU_pf_alloc();
@@ -106,7 +106,7 @@ static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2)
         e2->p1_addr     = phys_to_pfn((uint64_t)frame);
         e2->present     = 1;
         e2->rw          = 1;
-        e2->us          = 0;
+        e2->us          = user ? 1 : 0;
         e2->big_page    = 0;
         e2->allocated   = 1;
     }
@@ -123,12 +123,20 @@ static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2)
  */
 static struct p1_entry *travel_pagetable(uint64_t va, int create)
 {
+    int is_user = (va >= VA_USER_BASE) ? 1 : 0;
+
     uint16_t idx4 = PML4_INDEX(va);
     uint16_t idx3 = PDP_INDEX(va);
     uint16_t idx2 = PD_INDEX(va);
     uint16_t idx1 = PT_INDEX(va);
-    
-    struct p4_entry *e4 = &ptable_p4[idx4];
+
+    /* get current P4 table from cr3 reg */
+    uint64_t cr3 = 0;
+    asm volatile("mov %0, cr3" : "=r" (cr3));
+    struct p4_entry *curr_p4_table = NULL; 
+    curr_p4_table = (struct p4_entry *)(VA_PHYS_BASE + (cr3 & PAGE_MASK)); 
+
+    struct p4_entry *e4 = &curr_p4_table[idx4];
     struct p3_entry *pdpt;
     struct p2_entry *pd;
     struct p1_entry *pt;
@@ -136,7 +144,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
     /* walk from p4 to p3 */
     if (!e4->present) {
         if (create) {
-            pdpt = get_or_alloc_PDPT_entry(e4);
+            pdpt = get_or_alloc_PDPT_entry(e4, is_user);
             if (pdpt == INVALID_FRAME_ADDR) {
                 printk("Failed to alloc P3 table\n");
                 return INVALID_FRAME_ADDR;
@@ -145,7 +153,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
             return INVALID_FRAME_ADDR;
         }
     } else {
-        pdpt = get_or_alloc_PDPT_entry(e4);
+        pdpt = get_or_alloc_PDPT_entry(e4, is_user);
     }
 
     /* p3 to p2 */
@@ -157,7 +165,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
     
     if (!e3->present) {
         if (create) {
-            pd = get_or_alloc_PD_entry(e3);
+            pd = get_or_alloc_PD_entry(e3, is_user);
             if (pd == INVALID_FRAME_ADDR) {
                 printk("Failed to alloc P2 table\n");
                 return INVALID_FRAME_ADDR;
@@ -166,7 +174,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
             return INVALID_FRAME_ADDR;
         }
     } else {
-        pd = get_or_alloc_PD_entry(e3);
+        pd = get_or_alloc_PD_entry(e3, is_user);
     }
 
     /* p2 to p1 */
@@ -178,7 +186,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
 
     if (!e2->present) {
         if (create) {
-            pt = get_or_alloc_PT_entry(e2);
+            pt = get_or_alloc_PT_entry(e2, is_user);
             if (pt == INVALID_FRAME_ADDR) {
                 printk("Failed to alloc P1 table\n");
                 return INVALID_FRAME_ADDR;
@@ -187,7 +195,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
             return INVALID_FRAME_ADDR;
         }
     } else {
-        pt = get_or_alloc_PT_entry(e2);
+        pt = get_or_alloc_PT_entry(e2, is_user);
     }
     
     /* the p1 entry for the given VA */
@@ -220,6 +228,28 @@ static void make_identity_map(void)
 
     /* load the new page table into cr3 reg */
     asm volatile("mov cr3, %0" : : "r" (&ptable_p4) : "memory");
+}
+
+/* used when creating user processes. Maps the entire kernel VA space into the 
+ * user processes so we can service syscalls
+ */
+uint64_t MMU_create_user_p4(void)
+{
+    void *p4 = MMU_pf_alloc();
+    if (p4 == INVALID_FRAME_ADDR) {
+        return 0;
+    }
+
+    /* use the identity map to access the alloced page */
+    struct p4_entry *new_p4 = (struct p4_entry *)(VA_PHYS_BASE + (uint64_t)p4);
+    memset(new_p4, 0, PAGE_SIZE);
+
+    /* copy the kernel P4 entries (slots 0-15) into the new P4 table */
+    for (int i = 0; i < 16; i++) {
+        new_p4[i] = ptable_p4[i];
+    }
+
+    return (uint64_t)p4;
 }
 
 /* reserve a virtual page using demand paging */
@@ -346,7 +376,7 @@ static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg)
         p1->phys_addr = phys_to_pfn((uint64_t)phys_frame);
         p1->present = 1;        /* frame is now present */
         p1->rw      = 1;
-        p1->us      = 0;
+        p1->us      = (fault_va >= VA_USER_BASE) ? 1 : 0;
         p1->demand  = 0;        
     } else {
         /* non-recoverable page fault */
@@ -354,7 +384,7 @@ static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg)
         printk("  - Faulting VA: %p\n", (void *)fault_va);
         printk("  - Error Code:  %d\n", error_code);
         printk("  - P1 Entry:    %p\n", p1);
-        if(p1 != INVALID_FRAME_ADDR) {
+        if (p1 != INVALID_FRAME_ADDR) {
              printk("  - P1 Present: %d, Demand: %d\n", p1->present, p1->demand);
         }
 

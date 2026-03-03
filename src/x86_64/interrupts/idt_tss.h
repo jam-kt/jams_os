@@ -14,9 +14,6 @@ void add_idt_entry(uint8_t vector, uint8_t IST, uint8_t type, uint8_t DPL);
 /* see the bottom of boot.asm for GDT layout */
 #define KERNEL_CS   0x08    /* kernel code segment GDT offset */
 #define KERNEL_DS   0x10    /* kernel data segment */
-/* when using user-space selectors bitwise OR with 0x3 to set the RPL bits */
-#define USER_DS     0x18    /* user data segment   */
-#define USER_CS     0x20    /* user code segment   */
 #define TSS_DESC_CS 0x28    /* TSS GDT offset      */
 
 /* 

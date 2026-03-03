@@ -48,6 +48,17 @@ void kexit(void)
     syscall0(SYS_KEXIT);
 }
 
+static void trigger_fault_isr(void)
+{
+    asm volatile("int $13");
+}
+
+static void trigger_fault_page(void)
+{
+    volatile uint64_t x = *(volatile uint64_t *)0x1000;
+    (void)x;
+}
+
 int main(void) 
 {
     putc('H');
@@ -57,10 +68,17 @@ int main(void)
     putc('o');
     putc('\n');
 
-    // while (1) {
-    //     char c = getc();
-    //     putc(c);
-    // }
+    while (1) {
+        char c = getc();
+
+        if (c == '1') {
+            trigger_fault_isr();
+        } else if (c == '2') {
+            trigger_fault_page();
+        }
+
+        putc(c);
+    }
     
     return 0;
 }

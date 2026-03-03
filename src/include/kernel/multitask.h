@@ -13,7 +13,7 @@ void kexit(void);
 void multitask_init();
 void PROC_run(void);
 void PROC_create_kthread(kproc_t entry_point, void *arg);
-void PROC_create_uthread(kproc_t entry_point, void *arg);
+void PROC_create_uthread(kproc_t entry_point, void *arg, uint64_t cr3);
 void PROC_reschedule(void);
 
 

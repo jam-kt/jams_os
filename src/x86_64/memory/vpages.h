@@ -6,13 +6,7 @@
 #define CREATE_MODE 1
 #define WALK_MODE   0
 
-/* describes the virtual addr layout  */
-#define VA_PHYS_BASE    0x000000000000   /* slot 0  identity map */
-#define VA_KHEAP_BASE   0x010000000000   /* slot 1  kernel heap */
-#define VA_RESERVED     0x020000000000    
-#define VA_KSTACK_BASE  0x0F0000000000   /* slot 15 kernel stacks */
-#define VA_USER_BASE    0x100000000000   /* slot 16 user space */
-
+/* 12 bits to index the actual page, then 9 bits to index entries per level */
 /* masks / helpers */
 #define PAGE_MASK          (~(PAGE_SIZE - 1ULL))
 #define PML4_INDEX(va)     (((uint64_t)(va) >> 39) & 0x1FFULL)
