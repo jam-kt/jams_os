@@ -138,7 +138,7 @@ void keyboard_init(void)
     PROC_init_queue(&kbd_wait_queue);
 
     /* register keyboard interrupt */
-    register_interrupt(KBD_ISR_NUM, 0, TYPE_INTRGATE, ISR33_keyboard_irq, NULL);
+    register_interrupt(KBD_ISR_NUM, 0, TYPE_INTRGATE, 0, ISR33_keyboard_irq, NULL);
 }
 
 /* return ASCII character or -1 for unsupproted/no scancodes */

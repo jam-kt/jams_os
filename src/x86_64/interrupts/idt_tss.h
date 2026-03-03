@@ -7,12 +7,16 @@
 
 /* ---------------------------- IDT ---------------------------- */
 void idt_init();
-void add_idt_entry(uint8_t vector, uint8_t IST, uint8_t type);
+void add_idt_entry(uint8_t vector, uint8_t IST, uint8_t type, uint8_t DPL);
 
 #define STUB_SIZE 9   /* each ASM ISR stub is 9 bytes */
 
 /* see the bottom of boot.asm for GDT layout */
-#define KERNEL_CS 0x08      /* kernel code segment descriptor offset in GDT */
+#define KERNEL_CS   0x08    /* kernel code segment GDT offset */
+#define KERNEL_DS   0x10    /* kernel data segment */
+#define USER_DS     0x18    /* user data segment   */
+#define USER_CS     0x20    /* user code segment   */
+#define TSS_DESC_CS 0x28    /* TSS GDT offset      */
 
 /* 
  * IDT entry (Interrupt Gate Descriptor)
@@ -44,7 +48,6 @@ struct idt_descriptor {
 /* ---------------------------- TSS ---------------------------- */
 void tss_init();
 
-#define TSS_DESC_CS     0x18    /* TSS descriptor byte offset in GDT */
 #define TSS_STACK_SIZE  4096
 #define TSS_TYPE        0x9     /* magic number, means TSS is available */
 

@@ -172,8 +172,16 @@ global gdt64
 gdt64:
     dq 0 ; zero entry
 .code: equ $ - gdt64                         ; GDT offset
-    dq (1<<43) | (1<<44) | (1<<47) | (1<<53) ; code segment
-    dq 0                                     ; data segment (for completeness)
+    ; kernel code segment 0x08
+    dq (1<<43) | (1<<44) | (1<<47) | (1<<53)
+    ; kernel data segment 0x10
+    dq (1<<43) | (1<<44) | (1<<47)                               
+    ; user code segment 0x18
+    dq (1<<41) | (1<<44) | (3<<45) | (1<<47) | (1<<53)
+    ; user data segment 0x20
+    dq (1<<41) | (1<<44) | (3<<45) | (1<<47) 
+
+    ; TSS 0x28
     dq 0                                     ; TSS descriptor low 8 bytes
     dq 0                                     ; TSS descriptor high 8 bytes
 .pointer:

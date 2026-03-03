@@ -57,9 +57,9 @@ void interrupts_init()
 
     /* TODO: move registering handlers to a new file for each specific ISR ? */
     /* register basic double fault handler */
-    register_interrupt(8, 1, TYPE_INTRGATE, ISR8_double_fault, NULL);
+    register_interrupt(8, 1, TYPE_INTRGATE, 0, ISR8_double_fault, NULL);
     /* basic general protection fault handler */
-    register_interrupt(13, 2, TYPE_INTRGATE, ISR13_general_protection, NULL);
+    register_interrupt(13, 2, TYPE_INTRGATE, 0, ISR13_general_protection, NULL);
 }
 
 /*
@@ -69,7 +69,7 @@ void interrupts_init()
  * - handler: callback function
  * - arg    : ISR specific context struct or if NULL defaults to the rsp
  */
-void register_interrupt(int vector, uint8_t IST, uint8_t type, isr_t handler, void *arg)
+void register_interrupt(int vector, uint8_t IST, uint8_t type, uint8_t DPL, isr_t handler, void *arg)
 {
     CLI();
 
@@ -78,7 +78,7 @@ void register_interrupt(int vector, uint8_t IST, uint8_t type, isr_t handler, vo
         return;
     }
 
-    add_idt_entry(vector, IST, type);
+    add_idt_entry(vector, IST, type, DPL);
     
     isr_table[vector].handler = handler;
     isr_table[vector].arg = arg;

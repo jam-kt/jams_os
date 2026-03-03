@@ -31,17 +31,14 @@ static struct syscall_entry syscall_table[NUM_SYSCALLS];
 void syscall_init()
 {
     /* register all syscalls as a trap on vector 128 */
-    // TODO: very likely need to make the gate user-callable via DPL=3
-    // otherwise we would fault when trying to syscall from user space
-    // requires modifying the interrupts api to allow an extra arg
-    register_interrupt(SYSCALL_ISR_VECTOR, 0, TYPE_INTRGATE, ISR128_syscall, NULL);
+    register_interrupt(SYSCALL_ISR_VECTOR, 0, TYPE_INTRGATE, 3, ISR128_syscall, NULL);
 
     /* this temp interrupt will allow the kexit syscall to run on IST 3 
      * The generic syscalls may not run on IST3 since it causes issues with 
      * yield saving the wrong rsp. Once we have a cleanup thread remove this
      * vector and call kexit using the syscall vector on 0x80
      */
-    register_interrupt(KEXIT_ISR_VECTOR_TEMP, 3, TYPE_INTRGATE, ISR129_kexit, NULL);
+    register_interrupt(KEXIT_ISR_VECTOR_TEMP, 3, TYPE_INTRGATE, 3, ISR129_kexit, NULL);
 
     /* register generic IO syscalls */
     register_syscall(SYS_GETC_NUM, sys_getc);

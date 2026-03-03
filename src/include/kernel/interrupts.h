@@ -24,6 +24,6 @@ void interrupts_init();
 void CLI();
 void STI();
 int are_interrupts_enabled();
-void register_interrupt(int vector, uint8_t IST, uint8_t type, isr_t handler, void *arg);
+void register_interrupt(int vector, uint8_t IST, uint8_t type, uint8_t DPL, isr_t handler, void *arg);
 
 #endif

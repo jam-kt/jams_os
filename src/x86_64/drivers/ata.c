@@ -181,7 +181,7 @@ static void ata_delay(uint16_t base)
     ata->dev.name = name;
 
     /* register */
-    register_interrupt(irq, 0, TYPE_INTRGATE, ISR_ata_handler, ata);
+    register_interrupt(irq, 0, TYPE_INTRGATE, 0, ISR_ata_handler, ata);
     blk_register((block_dev *)ata);
 
     return (block_dev *)ata;

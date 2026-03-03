@@ -161,7 +161,7 @@ void kernel_main(void *mboot_header)
 
         CLI();
         if (num_proc_runnable() <= 1) {
-            asm volatile("sti");
+            asm volatile("sti");    /* re-enable interrupts after halting */
             asm volatile("hlt");    /* halts until an ISR unblocks a thread  */
         } else {
             STI();

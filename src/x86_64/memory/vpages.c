@@ -367,7 +367,7 @@ void MMU_init(void)
 {
     make_identity_map();
     kernel_va = VA_KHEAP_BASE;
-    register_interrupt(14, 0, TYPE_TRAPGATE, ISR14_PAGE_FAULT_HANDLER, NULL);
+    register_interrupt(14, 0, TYPE_TRAPGATE, 0, ISR14_PAGE_FAULT_HANDLER, NULL);
 }
 
 void MMU_test(void)

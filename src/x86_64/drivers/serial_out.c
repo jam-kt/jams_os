@@ -57,7 +57,7 @@ int serial_init() {
     /* bounded buffer, ISR consumes to send bytes over serial */
     bbuf_init(&ser_st, ser_buf, SER_BUFFER_SIZE);
 
-    register_interrupt(36, 0, TYPE_INTRGATE, ISR36_IRQ4_serial, NULL);
+    register_interrupt(36, 0, TYPE_INTRGATE, 0, ISR36_IRQ4_serial, NULL);
 
     return 0;
 }

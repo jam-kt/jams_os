@@ -30,26 +30,26 @@ void idt_init()
     asm volatile("lidt %0" : : "m"(idt_desc));
 
     for (int vector = 0; vector < NUM_ISRS; vector++) {
-        add_idt_entry(vector, 0, TYPE_INTRGATE);
+        add_idt_entry(vector, 0, TYPE_INTRGATE, 0);
     }
 }
 
 /* add or modify an entry to the IDT */
-void add_idt_entry(uint8_t vector, uint8_t IST, uint8_t type)
+void add_idt_entry(uint8_t vector, uint8_t IST, uint8_t type, uint8_t DPL)
 {
     /* get addr of stub using first stub addr and pointer arithmetic */
     uintptr_t addr = (uintptr_t)&isr0 + (vector * STUB_SIZE);
     idt[vector].offset1 = (uint16_t)(addr & 0xFFFF);
-    idt[vector].select  = KERNEL_CS;
+    idt[vector].select  = KERNEL_CS & ~0x3;     /* ensure selector RPL = 0 */
     idt[vector].IST     = IST;
     idt[vector].type    = type;
-    idt[vector].DPL     = 0;
+    idt[vector].DPL     = DPL & 0x3;
     idt[vector].pres    = 1;
     idt[vector].offset2 = (uint16_t)((addr >> 16) & 0xFFFF);
     idt[vector].offset3 = (uint32_t)((addr >> 32) & 0xFFFFFFFF);
 }
 
-/* TSS initialization (call after idt_init */
+/* TSS initialization (call after idt_init) */
 void tss_init()
 {
     /* set offset to the io bitmap (unused) */
