@@ -1,5 +1,6 @@
 #include <stddef.h>
 
+#include <kernel/interrupts.h>
 #include <kernel/kmalloc.h>
 #include <kernel/memory.h>
 #include <stdio.h>
@@ -66,6 +67,10 @@ void *kmalloc(size_t size)
         return NULL;
     }
 
+    int ints_enabled = are_interrupts_enabled();
+    CLI();
+
+
     size_t total_size = size + sizeof(struct kmalloc_extra);
     struct kmalloc_pool *best_pool = NULL;
     void *block = NULL;
@@ -105,6 +110,10 @@ void *kmalloc(size_t size)
     header->pool = best_pool;
     header->size = size;
 
+    if (ints_enabled) {
+        STI();
+    }
+
     return (void *)(header + 1);
 }
 
@@ -117,6 +126,9 @@ void kfree(void *addr)
     if (addr == NULL) {
         return;
     }
+
+    int ints_enabled = are_interrupts_enabled();
+    CLI();
 
     /* get header using pointer arithmetic from the allocation base addr */
     struct kmalloc_extra *header = (struct kmalloc_extra *)addr - 1;
@@ -132,5 +144,9 @@ void kfree(void *addr)
         size_t total_size = header->size + sizeof(struct kmalloc_extra);
         size_t num_pages = (total_size + PAGE_SIZE - 1) / PAGE_SIZE;
         MMU_free_pages(header, num_pages);
+    }
+
+    if (ints_enabled) {
+        STI();
     }
 }

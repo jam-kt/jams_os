@@ -31,6 +31,7 @@ static struct syscall_entry syscall_table[NUM_SYSCALLS];
 void syscall_init()
 {
     /* register all syscalls as a trap on vector 128 */
+    /* ^^ need to do some bug fixes first, not thread safe rn */
     register_interrupt(SYSCALL_ISR_VECTOR, 0, TYPE_INTRGATE, 3, ISR128_syscall, NULL);
 
     /* this temp interrupt will allow the kexit syscall to run on IST 3 
@@ -88,9 +89,6 @@ static void ISR128_syscall(int vector, int err, void *rsp)
         printk("halting...\n");
         __asm__("hlt");
     }
-
-    // TODO: return the specific syscalls return code... regs->rax = ret 
-    // not strictly needed since our syscalls can print and terminate for errors
 }
 
 static void ISR129_kexit(int vector, int err, void *rsp)

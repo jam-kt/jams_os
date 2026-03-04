@@ -274,6 +274,9 @@ static int demand_page(uint64_t va)
 
 void *MMU_alloc_page(void)
 {
+    int ints_enabled = are_interrupts_enabled();
+    CLI();
+    
     uint64_t va = kernel_va;
     if (demand_page(va) < 0) {
         return NULL;
@@ -281,11 +284,18 @@ void *MMU_alloc_page(void)
 
     kernel_va += PAGE_SIZE;
 
+    if (ints_enabled) {
+        STI();
+    }
+
     return (void *)va;
 }
 
 void *MMU_alloc_pages(int num)
 {
+    int ints_enabled = are_interrupts_enabled();
+    CLI();
+
     uint64_t base = kernel_va;
     for (int i = 0; i < num; i++) {
         if (demand_page(base + i * PAGE_SIZE) < 0) {
@@ -295,12 +305,19 @@ void *MMU_alloc_pages(int num)
 
     kernel_va += (uint64_t)num * PAGE_SIZE;
 
+    if (ints_enabled) {
+        STI();
+    }
+
     return (void *)base;
 }
 
 /* only used so the ELF loader can demand a page in high mem regions */
 void *MMU_alloc_at(uint64_t vaddr, uint64_t size) 
 {
+    int ints_enabled = are_interrupts_enabled();
+    CLI();
+    
     uint64_t base = vaddr & PAGE_MASK;
     uint64_t end = (vaddr + size + PAGE_SIZE - 1) & PAGE_MASK;
     int num_pages = (end - base) / PAGE_SIZE;
@@ -310,6 +327,10 @@ void *MMU_alloc_at(uint64_t vaddr, uint64_t size)
             printk("MMU_alloc_at: could not alloc at %p\n", (void *)vaddr);
             return NULL;
         }
+    }
+
+    if (ints_enabled) {
+        STI();
     }
 
     return (void *)base;

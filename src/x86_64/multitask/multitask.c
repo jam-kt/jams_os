@@ -97,6 +97,7 @@ static uint64_t syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3,
     if (exiting->kstack) {
         kfree(exiting->kstack);
     }
+    /* need to free user space stacks somewhere. Maybe a user proc trampoline */
     // if (exiting->ustack) {
     //     kfree(exiting->ustack);
     // }
@@ -114,7 +115,7 @@ void PROC_run(void)
 {
     if (!multitask_started) {
         memset(&main_proc, 0, sizeof(main_proc));
-        sched->admit(&main_proc);
+        // sched->admit(&main_proc);
         curr_proc = &main_proc;
         next_proc = &main_proc;
         multitask_started = 1;
@@ -267,9 +268,8 @@ void PROC_reschedule(void)
 {
     proc candidate = sched->next();
     if (candidate == NULL) {
-        if (curr_proc) {
-            next_proc = curr_proc;
-        } else if (multitask_started) {
+        /* go to idle thread */
+        if (multitask_started) {
             next_proc = &main_proc;
         } else {
             next_proc = NULL;

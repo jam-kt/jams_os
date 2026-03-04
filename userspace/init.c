@@ -38,22 +38,22 @@ void putc(char c)
     syscall1(SYS_PUTC, (uint64_t)c);
 }
 
-char getc(void) 
+char getc() 
 {
     return (char)syscall0(SYS_GETC);
 }
 
-void kexit(void) 
+void kexit() 
 {
     syscall0(SYS_KEXIT);
 }
 
-static void trigger_fault_isr(void)
+static void trigger_fault_isr()
 {
     asm volatile("int $13");
 }
 
-static void trigger_fault_page(void)
+static void trigger_fault_page()
 {
     volatile uint64_t x = *(volatile uint64_t *)0x1000;
     (void)x;

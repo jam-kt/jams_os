@@ -18,6 +18,7 @@
 #include <kernel/ext2.h>
 #include <kernel/md5.h>
 #include <kernel/elf64.h>
+#include <kernel/pit.h>
 
 void ls_recursive(struct inode *dir, int indent_level);
 void test_fs_checksum(struct inode *root);
@@ -97,7 +98,7 @@ static void ata_test_thread(void *arg)
         kexit();
     }
 
-    // ls_recursive(sb->root_inode, 0);
+    ls_recursive(sb->root_inode, 0);
 
     /* ELF loading */
     elf_load(sb->root_inode, "init.elf");
@@ -147,9 +148,11 @@ void kernel_main(void *mboot_header)
     interrupts_init();
     serial_init();
     syscall_init();
-    multitask_init();
     parse_mboot_tags(mboot_header);
     MMU_init();
+    multitask_init();
+    PROC_run();
+    pit_init();
 
     printk("pre-multitasking kernel initialization finished\n");
 
@@ -157,14 +160,14 @@ void kernel_main(void *mboot_header)
 
     /* idle loop */
     while (1) {
-        PROC_run();             /* check for other runnable threads in sched */
-
         CLI();
-        if (num_proc_runnable() <= 1) {
-            asm volatile("sti");    /* re-enable interrupts after halting */
+        if (num_proc_runnable() == 0) {
+            asm volatile("sti");    /* re-enables interrupts AFTER halting */
             asm volatile("hlt");    /* halts until an ISR unblocks a thread  */
         } else {
             STI();
+            /* give up rest of quantum */
+            yield();
         }
     }
 
