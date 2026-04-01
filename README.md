@@ -1,36 +1,254 @@
-# x86_64 Kernel Project
+# x86-64 Learning Kernel
 
-use $make run
+A hobby operating system kernel written from scratch in C and x86-64 assembly.
+This project started as a way for me to move beyond textbook OS concepts and
+learn how the pieces actually fit together at a low level: bootstrapping,
+interrupts, memory management, multitasking, block devices, filesystems, ELF
+loading, and a tiny user space.
 
+It is intentionally a learning kernel, but it is not just a boot-to-screen
+exercise. The current system boots through GRUB, enters long mode, sets up
+interrupt handling and paging, schedules threads, reads an ext2 filesystem from
+an ATA-backed disk image, and loads a simple ELF user program that can interact
+with the kernel through syscalls.
 
-If permission error occurs wheb trying to $make run then ensure the shell script 
-is executable. $chmod +x make_image.sh
+From a systems perspective, the most important detail is that user programs do
+not run in the kernel's address space as a shortcut. The kernel builds a
+separate user page-table root, maps user code/data/stack into that address
+space, preserves kernel mappings needed to service traps and syscalls, and then
+enters the user program through a proper privilege transition.
 
-To debug:
+## Demo
 
-gdb
+```text
+[ Demo GIF / terminal capture ]
+```
+
+`TODO:` Replace the placeholder above with a GIF showing the kernel booting,
+enumerating storage, loading `init.elf`, and handling keyboard input.
+
+## Table of Contents
+
+- [Why I Built This](#why-i-built-this)
+- [What The Kernel Does](#what-the-kernel-does)
+- [Current Highlights](#current-highlights)
+- [Memory Architecture](#memory-architecture)
+- [Project Layout](#project-layout)
+- [Building and Running](#building-and-running)
+- [Debugging](#debugging)
+- [Further Reading](#further-reading)
+
+## Why I Built This
+
+I built this project to get hands-on experience with systems programming at the
+lowest levels. I wanted a project that forced me to understand how a machine
+boots, how privileged code interacts with hardware, how memory translation is
+established, and how a kernel begins to grow into a real operating system.
+
+This kernel became my personal lab for learning:
+
+- x86-64 boot flow and long mode setup
+- interrupt handling, faults, and privilege boundaries
+- physical and virtual memory management
+- cooperative/preemptive scheduling foundations
+- block devices, partition parsing, and ext2 filesystem traversal
+- ELF loading and launching a simple user process
+
+## What The Kernel Does
+
+At a high level, the kernel currently:
+
+- Boots via GRUB using a custom x86-64 kernel image
+- Initializes interrupts, IDT/TSS state, PIC handling, and timer support
+- Parses the multiboot memory map and builds a physical frame allocator
+- Sets up paging and virtual memory structures for kernel and user space
+- Uses demand paging so virtual pages can be reserved first and backed by
+  physical frames on first access through the page fault handler
+- Provides a basic heap allocator (`kmalloc`/`kfree`)
+- Supports kernel threads and user threads with a round-robin scheduler
+- Exposes a small syscall interface for user programs
+- Creates user processes with their own page-table root and user-mode stack
+- Talks to ATA storage and registers block devices
+- Parses an MBR partition table and locates an ext2 partition
+- Mounts and reads an ext2 filesystem through a small VFS layer
+- Loads and launches a user-space ELF program from disk
+- Supports serial output and keyboard input for simple interaction
+
+## Current Highlights
+
+These are the pieces that make this project a strong portfolio item today:
+
+- **Boot and architecture setup:** GRUB boot path, long mode initialization,
+  custom linker scripts, GDT/IDT/TSS
+- **Interrupts and faults:** Interrupt registration, PIC setup, exception
+  handling, and dedicated fault paths
+- **Memory management:** Multiboot memory map parsing, page-frame allocation,
+  page-table walking, demand paging, kernel heap allocation
+- **Multitasking:** Kernel and user thread creation, context switching, and
+  round-robin scheduling
+- **User space:** Small syscall layer plus a tiny `init.elf` program that
+  runs entirely in ring 3 with its own VA space and syscall kernel stack.
+- **Storage and filesystem:** ATA block device probing, MBR parsing, ext2
+  detection, inode/directory traversal, file reads
+- **Program loading:** ELF64 loader that maps segments into a user address
+  space and starts execution
+
+## Memory Architecture
+
+The kernel uses an explicit virtual address layout defined in
+[`memory.h`](/src/include/kernel/memory.h):
+
+- `0x000000000000`: identity-mapped physical memory window
+- `0x010000000000`: kernel heap base
+- `0x0F0000000000`: kernel stack region
+- `0x100000000000`: user virtual address base
+- `0x110000000000`: user stack base
+
+This layout matters because it keeps the project organized around real address
+space boundaries instead of treating all execution as one undifferentiated
+memory region.
+
+The memory subsystem currently includes:
+
+- A physical frame allocator built from the multiboot memory map, with kernel
+  ELF regions carved out so reserved frames are not handed back as free memory
+- Four-level x86-64 page-table walking and allocation
+- Demand paging support, where virtual pages are marked as reserved and backed
+  by physical frames lazily in the page fault handler on first touch
+- Separate user page-table roots created with `MMU_create_user_p4()`
+- User mappings marked with the user-accessible bit, while kernel mappings
+  remain supervisor-only
+
+When a user program is launched, the ELF loader creates a new user `cr3`,
+copies the kernel portion of the PML4 into the new address space so syscalls
+and traps can still be serviced, maps the program segments into the user
+region, allocates a user stack, and starts execution in ring 3 via `iretq`
+state prepared by the scheduler. That separation is one of the biggest
+indicators of project maturity in the current codebase.
+
+## Project Layout
+
+```text
+src/kernel/                  Architecture-agnostic core kernel subsystems
+src/x86_64/                  Architecture-specific subsystems and boot code
+src/x86_64/interrupts/       Interrupt, PIC, and IDT
+src/x86_64/memory/           Physical and virtual memory management
+src/x86_64/multitask/        Scheduler, process/thread setup, and syscalls
+src/x86_64/drivers/          VGA, ATA, PIT, PS/2 keyboard, serial
+userspace/                   Tiny freestanding user program and linker script
+klibc/                       Minimal C library support used by the kernel
+make_image.sh                Disk image creation, partitioning, filesystem setup, GRUB install
+gdbinit                      Convenience script for debugging with GDB
+```
+
+## Building and Running
+
+### Prerequisites
+
+You will need a Linux development environment with:
+
+- `nasm`
+- `qemu-system-x86_64`
+- `grub-install`
+- `parted`
+- `losetup`
+- `mkfs.ext2`
+- `gdb`
+- `sudo`
+- an `x86_64-elf-gcc` cross-compiler
+
+By default the `Makefile` expects the cross-compiler at:
+
+```bash
+~/cross/bin/x86_64-elf-gcc
+```
+
+### Build
+
+```bash
+make
+```
+
+This builds:
+
+- the kernel binary at `build/kernel-x86_64.bin`
+- the user program at `build/init.elf`
+
+### Run
+
+```bash
+chmod +x make_image.sh
+make run
+```
+
+`make run` will:
+
+1. Build a raw disk image
+2. Partition it with an MBR layout
+3. Create an ext2 filesystem
+4. Install GRUB
+5. Copy the kernel and `init.elf` into the image
+6. Boot the image in QEMU with serial output enabled
+
+Notes:
+
+- `make_image.sh` uses loop devices, filesystem tools, mounts, and `sudo`
+- On most systems that means image creation requires elevated privileges
+- QEMU is launched with `-s`, so it automatically opens a GDB server on port `1234`
+
+## Debugging
+
+Start the kernel in one terminal:
+
+```bash
+make run
+```
+
+Then attach from another terminal:
+
+```bash
+gdb -x gdbinit
+```
+
+The provided [`gdbinit`](/home/james/CPE454-kernel/gdbinit) file configures:
+
+- x86-64 Intel syntax
+- the kernel symbol file
+- a remote target at `localhost:1234`
+- TUI mode
+
+If you prefer to enter the commands manually:
+
+```gdb
 set arch i386:x86-64:intel
 symbol-file build/kernel-x86_64.bin
 target remote localhost:1234
+tui enable
+```
 
+Useful places to set early breakpoints include:
 
-There are sixteen 64-bit registers in x86-64: %rax, %rbx, %rcx, %rdx, %rdi, %rsi, %rbp,
-%rsp, and %r8-r15. Of these, %rax, %rcx, %rdx, %rdi, %rsi, %rsp, and %r8-r11 are
-considered caller-save registers, meaning that they are not necessarily saved across function
-calls. By convention, %rax is used to store a function’s return value, if it exists and is no more
-than 64 bits long. (Larger return types like structs are returned using the stack.) Registers %rbx,
-%rbp, and %r12-r15 are callee-save registers, meaning that they are saved across function
-calls. Register %rsp is used as the stack pointer, a pointer to the topmost element in the stack.
-Additionally, %rdi, %rsi, %rdx, %rcx, %r8, and %r9 are used to pass the first six integer
-or pointer parameters to called functions. Additional parameters (or large parameters such as
-structs passed by value) are passed on the stack.
-In 32-bit x86, the base pointer (formerly %ebp, now %rbp) was used to keep track of the base of
-the current stack frame, and a called function would save the base pointer of its caller prior to
-updating the base pointer to its own stack frame. With the advent of the 64-bit architecture, this
-has been mostly eliminated, save for a few special cases when the compiler cannot determine
-ahead of time how much stack space needs to be allocated for a particular function
+- `kernel_main`
+- `interrupts_init`
+- `MMU_init`
+- `PROC_create_uthread`
+- `elf_load`
 
-https://cs.brown.edu/courses/cs033/docs/guides/x64_cheatsheet.pdf
-https://users.ece.utexas.edu/~adnan/gdb-refcard.pdf
+## Further Reading
 
+I plan to add implementation writeups and notes for the subsystems below:
 
+- [Boot Process and Entering Long Mode](#)
+- [Interrupts, IDT, and Fault Handling](#)
+- [Physical Memory and Paging Design](#)
+- [Scheduler and Context Switching](#)
+- [ATA, MBR Parsing, and ext2 Integration](#)
+- [ELF Loading and Starting User Space](#)
+- [Lessons Learned While Building the Kernel](#)
+
+## Status
+
+This is an active personal learning project and a long-term systems playground.
+The current codebase already demonstrates core operating-system concepts end to
+end, and I plan to continue extending it with more robust process management,
+filesystem capabilities, and stronger debugging/testing tools.
