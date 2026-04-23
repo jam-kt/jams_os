@@ -4,12 +4,10 @@ An operating system kernel written from scratch in C and x86-64 assembly. Design
 
 ## Demo
 
-```text
-[ Demo GIF / terminal capture ]
-```
+<img width="630" height="350" alt="kerneldemo_small" src="https://github.com/user-attachments/assets/056451a3-17dd-4a53-b4bf-a372459d79dc" />
 
-`TODO:` Replace the placeholder above with a GIF showing the kernel booting,
-enumerating storage, loading `init.elf`, and handling keyboard input.
+This demo shows me building the kernel image, and then booting it in QEMU with serial output to my terminal.
+See [Building and Running](#building-and-running) for the full process!
 
 ## Table of Contents
 
