@@ -1,14 +1,14 @@
 # x86-64 Custom Kernel
 ```text
-                                        /$$$$$                                /$$$$$$   /$$$$$$ 
-                                       |__  $$                               /$$__  $$ /$$__  $$
-                                          | $$  /$$$$$$  /$$$$$$/$$$$       | $$  \ $$| $$  \__/
-                                          | $$ |____  $$| $$_  $$_  $$      | $$  | $$|  $$$$$$ 
-                                     /$$  | $$  /$$$$$$$| $$ \ $$ \ $$      | $$  | $$ \____  $$
-                                    | $$  | $$ /$$__  $$| $$ | $$ | $$      | $$  | $$ /$$  \ $$
-                                    |  $$$$$$/|  $$$$$$$| $$ | $$ | $$      |  $$$$$$/|  $$$$$$/
-                                     \______/  \_______/|__/ |__/ |__//$$$$$$\______/  \______/ 
-                                                                     |______/                    
+                                  /$$$$$                                /$$$$$$   /$$$$$$ 
+                                 |__  $$                               /$$__  $$ /$$__  $$
+                                    | $$  /$$$$$$  /$$$$$$/$$$$       | $$  \ $$| $$  \__/
+                                    | $$ |____  $$| $$_  $$_  $$      | $$  | $$|  $$$$$$ 
+                               /$$  | $$  /$$$$$$$| $$ \ $$ \ $$      | $$  | $$ \____  $$
+                              | $$  | $$ /$$__  $$| $$ | $$ | $$      | $$  | $$ /$$  \ $$
+                              |  $$$$$$/|  $$$$$$$| $$ | $$ | $$      |  $$$$$$/|  $$$$$$/
+                               \______/  \_______/|__/ |__/ |__//$$$$$$\______/  \______/ 
+                                                               |______/                    
 ```                                                                                                                 
 An operating system kernel written from scratch in C and x86-64 assembly. Designed to move beyond high-level OS theory, this project implements a complete boot-to-userspace pipeline. The system boots via GRUB, establishes virtual memory management, schedules threads, parses an ext2 filesystem from an ATA-backed disk image, and securely executes ELF binaries within a fully isolated Ring 3 address space.
 
