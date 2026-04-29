@@ -7,14 +7,17 @@
 #define DEFAULT_STACK_BYTES (8 * 1024 * 1024)   /* binary 8MB */
 
 typedef void (*kproc_t)(void *);
+struct inode;
 
 void yield(void);
 void kexit(void);
 void multitask_init();
 void PROC_run(void);
 void PROC_create_kthread(kproc_t entry_point, void *arg);
-void PROC_create_uthread(kproc_t entry_point, void *arg, uint64_t cr3);
+int PROC_create_uthread(kproc_t entry_point, void *arg, uint64_t cr3,
+                        void *ustack);
 void PROC_reschedule(void);
+void PROC_set_root(struct inode *root);
 
 
 /* unused right now, maybe we can use it to clean up code later */
@@ -40,6 +43,19 @@ typedef struct __attribute__ ((aligned(16))) __attribute__ ((packed)) regs {
 #define NO_THREAD 0             /* an always invalid thread id */
 
 typedef struct process_st *proc;
+/* queue for blocked processes */
+typedef struct proc_queue {
+    proc head;
+    proc tail;
+} proc_queue;
+
+typedef enum proc_state {
+    PROC_READY,
+    PROC_RUNNING,
+    PROC_BLOCKED,
+    PROC_ZOMBIE
+} proc_state_t;
+
 typedef struct process_st {
     uint64_t    pid;            /* lightweight process id  */
     uint64_t    *kstack;        /* Base of kernel stack    */
@@ -47,7 +63,12 @@ typedef struct process_st {
     size_t      stacksize;      /* Size of the two stack   */
     uint64_t    cr3;            /* addr of user P4 table   */
     rfile       state;          /* saved registers         */
-    uint32_t    status;         /* exited? exit status?    */
+    proc_state_t run_state;
+    int         exit_status;
+    proc        parent;
+    proc        first_child;
+    proc        next_sibling;
+    proc_queue  wait_child_exit;
     proc        lib_one;        /* Two pointers reserved   */
     proc        lib_two;        /* for use by the library  */
     proc        sched_one;      /* Two more for            */
@@ -55,12 +76,6 @@ typedef struct process_st {
     proc        exited;         /* and one for lwp_wait()  */
 } process_st;
 
-
-/* queue for blocked processes */
-typedef struct proc_queue {
-    proc head;
-    proc tail;
-} proc_queue;
 
 void PROC_init_queue(proc_queue *q);
 void PROC_block_on(proc_queue *q, int enable_ints);

@@ -99,6 +99,7 @@ static void ata_test_thread(void *arg)
     }
 
     ls_recursive(sb->root_inode, 0);
+    PROC_set_root(sb->root_inode);
 
     /* ELF loading */
     elf_load(sb->root_inode, "init.elf");
@@ -108,19 +109,6 @@ static void ata_test_thread(void *arg)
 }
 
 
-// static void kbd_io_thread(void *arg)
-// {
-//     printk("entering kbd io thread\n");
-
-//     while (1) {
-//         int c = keyboard_getchar();
-//         if (c == -1) {
-//             continue;
-//         }
-//         printk("%c", (char)c);
-//     }
-// }
-
 static void kernel_init(void *arg)
 {
     printk("started kernel initialization thread\n");
@@ -128,9 +116,6 @@ static void kernel_init(void *arg)
     /* post multithreading initialization here */
     ps2_init();
     keyboard_init();
-
-    // /* keyboard */
-    // PROC_create_kthread(kbd_io_thread, NULL);
 
     /* block device / ATA */
     PROC_create_kthread(ata_test_thread, NULL);
@@ -170,109 +155,12 @@ void kernel_main(void *mboot_header)
             yield();
         }
     }
-
-    // print formats
-    // printk("%c\n", 'a'); // should be "a"
-    // printk("%c\n", 'Q'); // should be "Q"
-    // printk("%c\n", 256 + '9'); // Should be "9"
-    // printk("%s\n", "test string"); // "test string"
-    // printk("foo%sbar\n", "blah"); // "fooblahbar"
-    // printk("foo%%sbar\n"); // "foo%sbar"
-    // printk("%d\n", INT_MIN); // "-2147483648"
-    // printk("%d\n", INT_MAX); // "2147483647"
-    // printk("%u\n", 0); // "0"
-    // printk("%u\n", UINT_MAX); // "4294967295"
-    // printk("%x\n", 0xDEADbeef); // "deadbeef"
-    // printk("%p\n", (void*)UINTPTR_MAX); // "0xFFFFFFFFFFFFFFFF"
-    // printk("%hd\n", 0x8000); // "-32768"
-    // printk("%hd\n", 0x7FFF); // "32767"
-    // printk("%hu\n", 0xFFFF); // "65535"
-    // printk("%ld\n", LONG_MIN); // "-9223372036854775808"
-    // printk("%ld\n", LONG_MAX); // "9223372036854775807"
-    // printk("%lu\n", ULONG_MAX); // "18446744073709551615"
-    // printk("%qd\n", (long long int)LONG_MIN); // "-9223372036854775808"
-    // printk("%qd\n", (long long int)LONG_MAX); // "9223372036854775807"
-    // printk("%qu\n", (long long unsigned int)ULONG_MAX); // "18446744073709551615"
-
-
-    // page frames testing for demo
-    // frames_sequence_test();
-    // frames_stress_test();
-
-    // MMU_test();
-
-    /* kmalloc tests */
-    // size_t test_size = 48;
-    // void *p = kmalloc(test_size);
-    // if (!p) {
-    //     printk("kmalloc failed (returned NULL)\n");
-    // }
-
-    // /* write then read a pattern */
-    // memset(p, 0x5A, test_size);
-    // for (size_t i = 0; i < test_size; i++) {
-    //     if (((uint8_t*)p)[i] != 0x5A) {
-    //         printk("kmalloc memory corrupt\n");
-    //     }
-    // }
-
-    // /* free and alloc again to test reuse */
-    // kfree(p);
-    // void *q = kmalloc(test_size);
-    // if (!q) {
-    //     printk("kmalloc failed on second alloc\n");
-    // }
-    // if (q != p) {
-    //     printk("kmalloc returned a different address on reuse\n");
-    // }
-
-    // kfree(q);
-
-    // void *big_block = kmalloc(4096);
-    // if (!big_block) {
-    //     printk("big block not allocated\n");
-    // }
-
-    // memset(big_block, 0xAA, 4096);
-    // for (size_t i = 0; i < 4096; i++) {
-    //     if (((uint8_t*)big_block)[i] != 0xAA) {
-    //         printk("kmalloc memory corrupt\n");
-    //     }
-    // }
-
-    // kfree(big_block);
-
-
-    // printk("test done\n");
-
-  
-
-    // PROC_run();
-    // PROC_create_kthread(worker_c, (void *)1);
-    // PROC_create_kthread(worker_c, (void *)2);
-    // PROC_create_kthread(worker_c, (void *)3);
-    
-    // for (int i = 0; i < 10; i++) {
-    //     PROC_run();
-    // }
 }
-
-// static void test_worker_c(void *arg)
-// {
-//     int id = (int)(uintptr_t)arg;
-//     int count = 0;
-//     for (int i = 0; i < 10; i++) {
-//         printk("[C%d] count=%d\n", id, count++);
-//         //dump_stack("[C]", 3);
-//         yield();
-//     }
-// }
-
 
 /* helpers for EXT32 read demonstration */
 int recursive_print_cb(const char *name, struct inode *inode, void *p) 
 {
-    static const char hex[] = "0123456789abcdef";   // yes this is dumb
+    // static const char hex[] = "0123456789abcdef";   // yes this is dumb
     int indent = *(int *)p;
     
     /* print indentation */
@@ -290,36 +178,39 @@ int recursive_print_cb(const char *name, struct inode *inode, void *p)
         if (strcmp(name, ".") != 0 && strcmp(name, "..") != 0) {
             ls_recursive(inode, indent + 1);
         }
-    } 
-    /* Check if it is a regular file */
-    else if (inode->mode & S_IFREG) {
-        /* Open the file to compute checksum */
-        struct file *f = inode->open(inode);
-        uint8_t *buf = kmalloc(4096);
-        
-        if (f) {
-            uint8_t digest[16];
-            
-            /* Compute hash of content only */
-            md5File(f, digest);
-            
-            printk(" MD5: ");
-            for(int i = 0; i < 16; ++i){
-                char hi = hex[(digest[i] >> 4) & 0xF];
-                char lo = hex[digest[i] & 0xF];
-                printk("%c%c", hi, lo);
-            }
-
-            while (f->read(f, buf, 4096) > 0);
-            
-            f->close(f);
-            kfree(buf);
-        } else {
-            printk(" [Error opening file]");
-        }
-        
+    } else {
         printk("\n");
     }
+
+    /* Check if it is a regular file */
+    // else if (inode->mode & S_IFREG) {
+    //     /* Open the file to compute checksum */
+    //     struct file *f = inode->open(inode);
+    //     uint8_t *buf = kmalloc(4096);
+        
+    //     if (f) {
+    //         uint8_t digest[16];
+            
+    //         /* Compute hash of content only */
+    //         md5File(f, digest);
+            
+    //         printk(" MD5: ");
+    //         for(int i = 0; i < 16; ++i){
+    //             char hi = hex[(digest[i] >> 4) & 0xF];
+    //             char lo = hex[digest[i] & 0xF];
+    //             printk("%c%c", hi, lo);
+    //         }
+
+    //         while (f->read(f, buf, 4096) > 0);
+            
+    //         f->close(f);
+    //         kfree(buf);
+    //     } else {
+    //         printk(" [Error opening file]");
+    //     }
+        
+    //     printk("\n");
+    // }
 
     return 0;
 }

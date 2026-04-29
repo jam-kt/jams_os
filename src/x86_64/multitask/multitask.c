@@ -5,10 +5,11 @@
 #include <string.h>
 #include <kernel/interrupts.h>
 #include <kernel/kmalloc.h>
-#include <kernel/syscall.h>
 #include <kernel/memory.h>
 #include <kernel/scheduler.h>
 #include <kernel/multitask.h>
+
+#include "multitask_internal.h"
 
 #define x86_64_ALIGNMENT 16                     /* cpu happy  */   
 #define KERNEL_CS 0x08                          /* see boot.asm GDT layout */
@@ -24,98 +25,29 @@ static process_st main_proc;
 static uint64_t next_pid = 1;
 static int multitask_started = 0;
 
-static uint64_t syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
-                          uint64_t a5, uint64_t a6);
-static uint64_t syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
-                          uint64_t a5, uint64_t a6);
 static void thread_start(kproc_t entry, void *arg);
 static uintptr_t align_down(uintptr_t addr, size_t align);
 
 static void enqueue(proc_queue *q, proc p);
 static proc dequeue(proc_queue *q);
 
+/*******************************************************************************
+ * MULTITASKING INIT
+ ******************************************************************************/
 
 void multitask_init()
 {
     sched = round_robin;
-    register_syscall(SYS_YIELD_NUM, syscall_yield);
-    register_syscall(SYS_KEXIT_NUM, syscall_kexit);
-}
-
-/* the public facing syscalls */
-void yield(void) 
-{
-    register long nr asm("rax") = SYS_YIELD_NUM;
-    asm volatile("int 0x80" : "+a"(nr) :: "memory");
-}
-
-void kexit(void)
-{
-    register long nr asm("rax") = SYS_KEXIT_NUM;
-    /* TODO: SWITCH BACK TO VECTOR 0x80 ONCE WE HAVE A CLEANUP THREAD 
-     * SEE syscalls.c FOR REST OF THE TEMP KEXIT RUGPULL FIX */
-    asm volatile("int 0x81" : "+a"(nr) :: "memory");
-}
-
-uint64_t syscall_yield(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
-    uint64_t a5, uint64_t a6)
-{
-    (void)a1;
-    (void)a2;
-    (void)a3;
-    (void)a4;
-    (void)a5;
-    (void)a6;
-    PROC_reschedule();
-
-    return 0;
-}
-
-static uint64_t syscall_kexit(uint64_t a1, uint64_t a2, uint64_t a3, 
-    uint64_t a4, uint64_t a5, uint64_t a6)
-{
-    (void)a1;
-    (void)a2;
-    (void)a3;
-    (void)a4;
-    (void)a5;
-    (void)a6;
-
-    if (curr_proc == NULL) {
-        return 1;
-    }
-
-    proc exiting = curr_proc;
-    if (exiting == &main_proc) {
-        printk("kexit called on main thread, halting\n");
-        __asm__("hlt");
-    }
-
-    sched->remove(exiting);
-    curr_proc = NULL;
-
-    if (exiting->kstack) {
-        kfree(exiting->kstack);
-    }
-    /* need to free user space stacks somewhere. Maybe a user proc trampoline */
-    // if (exiting->ustack) {
-    //     kfree(exiting->ustack);
-    // }
-
-    if (exiting != &main_proc) {
-        kfree(exiting);
-    }
-
-    PROC_reschedule();
-
-    return 0;
+    PROC_register_syscalls();
 }
 
 void PROC_run(void)
 {
     if (!multitask_started) {
         memset(&main_proc, 0, sizeof(main_proc));
-        // sched->admit(&main_proc);
+        PROC_init_queue(&main_proc.wait_child_exit);
+        main_proc.run_state = PROC_RUNNING;
+        main_proc.cr3 = MMU_get_kernel_p4();
         curr_proc = &main_proc;
         next_proc = &main_proc;
         multitask_started = 1;
@@ -124,6 +56,9 @@ void PROC_run(void)
     yield();
 }
 
+/*******************************************************************************
+ * PROCESS CREATION
+ ******************************************************************************/
 void PROC_create_kthread(kproc_t entry_point, void *arg)
 {
     if (!entry_point) {
@@ -137,6 +72,7 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
     }
 
     memset(new_proc, 0, sizeof(*new_proc));
+    PROC_init_fields(new_proc, curr_proc);
 
     /* stack var serves as the base (low addr) of stack */
     void *stack = kmalloc(DEFAULT_STACK_BYTES);
@@ -146,9 +82,9 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
         return;
     }
 
-    new_proc->pid = next_pid++;
     new_proc->kstack = stack;
     new_proc->stacksize = DEFAULT_STACK_BYTES;
+    new_proc->cr3 = MMU_get_kernel_p4();
 
     /* sp var serves as the stack pointer (high addr) of stack */
     
@@ -188,36 +124,37 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
 
     new_proc->state.rsp = (unsigned long)stack_top;
 
+    PROC_link_child(curr_proc, new_proc);
     sched->admit(new_proc);
 }
 
 /* a new user page table must be created and passed through arg 3.
  * The calling context for this function must temporarily use that page table
  */
-void PROC_create_uthread(kproc_t entry_point, void *arg, uint64_t cr3)
+int PROC_create_uthread(kproc_t entry_point, void *arg, uint64_t cr3,
+                        void *ustack)
 {
-    if (!entry_point) {
-        return;
+    if (!entry_point || !ustack) {
+        return -1;
     }
 
     proc new_proc = kmalloc(sizeof(*new_proc));
     if (!new_proc) {
         printk("PROC_create_uthread: failed to allocate proc\n");
-        return;
+        return -1;
     }
 
     memset(new_proc, 0, sizeof(*new_proc));
+    PROC_init_fields(new_proc, curr_proc);
 
     /* stack var serves as the base (low addr) of stack */
     void *kstack = kmalloc(DEFAULT_STACK_BYTES);
-    void *ustack = MMU_alloc_at(VA_USTACK_BASE, DEFAULT_STACK_BYTES);
-    if (!kstack || !ustack) {
+    if (!kstack) {
         printk("PROC_create_uthread: failed to allocate stack\n");
         kfree(new_proc);
-        return;
+        return -1;
     }
 
-    new_proc->pid = next_pid++;
     new_proc->kstack = kstack;
     new_proc->ustack = ustack;
     new_proc->stacksize = DEFAULT_STACK_BYTES;
@@ -261,7 +198,10 @@ void PROC_create_uthread(kproc_t entry_point, void *arg, uint64_t cr3)
 
     new_proc->state.rsp = (unsigned long)kstack_top;
 
+    PROC_link_child(curr_proc, new_proc);
     sched->admit(new_proc);
+    
+    return 0;
 }
 
 void PROC_reschedule(void)
@@ -282,9 +222,16 @@ void PROC_reschedule(void)
         candidate = sched->next();
     }
 
+    if (curr_proc && curr_proc->run_state == PROC_RUNNING) {
+        curr_proc->run_state = PROC_READY;
+    }
+    candidate->run_state = PROC_RUNNING;
     next_proc = candidate;
 }
 
+/*******************************************************************************
+ * THREAD TRAMPOLINE
+ ******************************************************************************/
 static void thread_start(kproc_t entry, void *arg)
 {
     entry(arg);
@@ -297,8 +244,128 @@ static uintptr_t align_down(uintptr_t addr, size_t align)
     return addr & ~(align - 1);
 }
 
+/*******************************************************************************
+ * INTERNAL PROCESS HELPERS
+ ******************************************************************************/
+proc PROC_main_proc(void)
+{
+    return &main_proc;
+}
 
-/* process management code */
+void PROC_admit(proc p)
+{
+    sched->admit(p);
+}
+
+void PROC_remove(proc p)
+{
+    sched->remove(p);
+}
+
+void PROC_init_fields(proc p, proc parent)
+{
+    p->pid = next_pid++;
+    p->stacksize = DEFAULT_STACK_BYTES;
+    p->run_state = PROC_READY;
+    p->exit_status = 0;
+    p->parent = parent;
+    p->first_child = NULL;
+    p->next_sibling = NULL;
+    PROC_init_queue(&p->wait_child_exit);
+}
+
+void PROC_link_child(proc parent, proc child)
+{
+    if (!parent || !child) {
+        return;
+    }
+
+    child->parent = parent;
+    child->next_sibling = parent->first_child;
+    parent->first_child = child;
+}
+
+void PROC_unlink_child(proc parent, proc child)
+{
+    proc prev = NULL;
+    proc curr;
+
+    if (!parent || !child) {
+        return;
+    }
+
+    curr = parent->first_child;
+    while (curr) {
+        if (curr == child) {
+            if (prev) {
+                prev->next_sibling = curr->next_sibling;
+            } else {
+                parent->first_child = curr->next_sibling;
+            }
+            curr->parent = NULL;
+            curr->next_sibling = NULL;
+            return;
+        }
+
+        prev = curr;
+        curr = curr->next_sibling;
+    }
+}
+
+proc PROC_find_zombie_child(proc parent)
+{
+    for (proc child = parent ? parent->first_child : NULL;
+         child;
+         child = child->next_sibling) {
+        if (child->run_state == PROC_ZOMBIE) {
+            return child;
+        }
+    }
+
+    return NULL;
+}
+
+void PROC_reparent_children(proc exiting)
+{
+    proc child;
+
+    if (!exiting || !exiting->first_child) {
+        return;
+    }
+
+    child = exiting->first_child;
+    while (child->next_sibling) {
+        child->parent = &main_proc;
+        child = child->next_sibling;
+    }
+    child->parent = &main_proc;
+    child->next_sibling = main_proc.first_child;
+    main_proc.first_child = exiting->first_child;
+    exiting->first_child = NULL;
+}
+
+int PROC_copy_user_string(char *dst, const char *src, size_t dst_size)
+{
+    size_t i;
+
+    if (!dst || !src || dst_size == 0) {
+        return -1;
+    }
+
+    for (i = 0; i < dst_size - 1; i++) {
+        dst[i] = src[i];
+        if (dst[i] == '\0') {
+            return 0;
+        }
+    }
+
+    dst[dst_size - 1] = '\0';
+    return -1;
+}
+
+/*******************************************************************************
+ * BLOCKED PROCESS QUEUES
+ ******************************************************************************/
 
 void PROC_init_queue(proc_queue *q)
 {
@@ -315,6 +382,7 @@ void PROC_block_on(proc_queue *q, int enable_ints)
     }
 
     /* move from scheduler into driver's blocking queue */
+    curr_proc->run_state = PROC_BLOCKED;
     sched->remove(curr_proc);
     enqueue(q, curr_proc);
 
@@ -337,6 +405,7 @@ void PROC_unblock_head(proc_queue *q)
 
     proc p = dequeue(q);
     if (p) {
+        p->run_state = PROC_READY;
         sched->admit(p);
     }
 }

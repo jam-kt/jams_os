@@ -41,6 +41,14 @@ struct ELF64_prog_head {
     uint64_t alignment;
 } __attribute__((packed));
 
+struct elf_image {
+    uint64_t cr3;
+    uint64_t entry;
+    uint64_t ustack_base;
+    uint64_t ustack_top;
+};
+
+int elf_load_program(struct inode *root, const char *filename, struct elf_image *image);
 void elf_load(struct inode *root, const char *filename);
 
 #endif
