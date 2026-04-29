@@ -1,31 +1,23 @@
-# x86-64 Learning Kernel
-
-A hobby operating system kernel written from scratch in C and x86-64 assembly.
-This project started as a way for me to move beyond textbook OS concepts and
-learn how the pieces actually fit together at a low level: bootstrapping,
-interrupts, memory management, multitasking, block devices, filesystems, ELF
-loading, and a tiny user space.
-
-It is intentionally a learning kernel, but it is not just a boot-to-screen
-exercise. The current system boots through GRUB, enters long mode, sets up
-interrupt handling and paging, schedules threads, reads an ext2 filesystem from
-an ATA-backed disk image, and loads a simple ELF user program that can interact
-with the kernel through syscalls.
-
-From a systems perspective, the most important detail is that user programs do
-not run in the kernel's address space as a shortcut. The kernel builds a
-separate user page-table root, maps user code/data/stack into that address
-space, preserves kernel mappings needed to service traps and syscalls, and then
-enters the user program through a proper privilege transition.
+# x86-64 Custom Kernel
+```text
+                            /$$$$$                                /$$$$$$   /$$$$$$ 
+                           |__  $$                               /$$__  $$ /$$__  $$
+                              | $$  /$$$$$$  /$$$$$$/$$$$       | $$  \ $$| $$  \__/
+                              | $$ |____  $$| $$_  $$_  $$      | $$  | $$|  $$$$$$ 
+                         /$$  | $$  /$$$$$$$| $$ \ $$ \ $$      | $$  | $$ \____  $$
+                        | $$  | $$ /$$__  $$| $$ | $$ | $$      | $$  | $$ /$$  \ $$
+                        |  $$$$$$/|  $$$$$$$| $$ | $$ | $$      |  $$$$$$/|  $$$$$$/
+                         \______/  \_______/|__/ |__/ |__//$$$$$$\______/  \______/ 
+                                                         |______/                    
+```                                                                                                                 
+An operating system kernel written from scratch in C and x86-64 assembly. Designed to move beyond high-level OS theory, this project implements a complete boot-to-userspace pipeline. The system boots via GRUB, establishes virtual memory management, schedules threads, parses an ext2 filesystem from an ATA-backed disk image, and securely executes ELF binaries within a fully isolated Ring 3 address space.
 
 ## Demo
 
-```text
-[ Demo GIF / terminal capture ]
-```
+<img width="630" height="350" alt="kerneldemo_small" src="https://github.com/user-attachments/assets/056451a3-17dd-4a53-b4bf-a372459d79dc" />
 
-`TODO:` Replace the placeholder above with a GIF showing the kernel booting,
-enumerating storage, loading `init.elf`, and handling keyboard input.
+This demo shows me building the kernel image, and then booting it in QEMU with serial output to my terminal.
+See [Building and Running](#building-and-running) for the full process!
 
 ## Table of Contents
 
@@ -60,38 +52,31 @@ At a high level, the kernel currently:
 
 - Boots via GRUB using a custom x86-64 kernel image
 - Initializes interrupts, IDT/TSS state, PIC handling, and timer support
-- Parses the multiboot memory map and builds a physical frame allocator
+- Parses the multiboot memory map to build a physical frame allocator
 - Sets up paging and virtual memory structures for kernel and user space
-- Uses demand paging so virtual pages can be reserved first and backed by
-  physical frames on first access through the page fault handler
 - Provides a basic heap allocator (`kmalloc`/`kfree`)
 - Supports kernel threads and user threads with a round-robin scheduler
-- Exposes a small syscall interface for user programs
-- Creates user processes with their own page-table root and user-mode stack
-- Talks to ATA storage and registers block devices
+- Creates user processes with their own page-table root and hardware protection ring
+- Exposes a system call interface (`int 0x80`) for user programs
+- Talks to ATA storage via an interrupt-driven driver and registers block devices
 - Parses an MBR partition table and locates an ext2 partition
-- Mounts and reads an ext2 filesystem through a small VFS layer
+- Mounts and reads an ext2 filesystem through a modular VFS layer
 - Loads and launches a user-space ELF program from disk
+- Verifies filesystem integrity via recursive directory traversal and MD5 hashing
 - Supports serial output and keyboard input for simple interaction
 
 ## Current Highlights
 
-These are the pieces that make this project a strong portfolio item today:
+These are the pieces that demonstrate the project's maturity:
 
-- **Boot and architecture setup:** GRUB boot path, long mode initialization,
-  custom linker scripts, GDT/IDT/TSS
-- **Interrupts and faults:** Interrupt registration, PIC setup, exception
-  handling, and dedicated fault paths
-- **Memory management:** Multiboot memory map parsing, page-frame allocation,
-  page-table walking, demand paging, kernel heap allocation
-- **Multitasking:** Kernel and user thread creation, context switching, and
-  round-robin scheduling
-- **User space:** Small syscall layer plus a tiny `init.elf` program that
-  runs entirely in ring 3 with its own VA space and syscall kernel stack.
-- **Storage and filesystem:** ATA block device probing, MBR parsing, ext2
-  detection, inode/directory traversal, file reads
-- **Program loading:** ELF64 loader that maps segments into a user address
-  space and starts execution
+- **Boot and architecture setup:** GRUB boot path, long mode initialization, custom linker scripts, GDT/IDT, and dynamic TSS management.
+- **Interrupts and faults:** Interrupt registration, PIC setup, exception handling, and dedicated fault paths. 
+- **Memory management:** Multiboot memory map parsing, 4-level page-table walking, and kernel heap allocation. Virtual pages utilize **demand paging**, where pages are reserved and physically backed on-the-fly by the page fault handler only upon first access.
+- **Multitasking & Synchronization:** Kernel and user thread creation, context switching, and round-robin scheduling. Hardware interactions (like the ATA driver) avoid busy-looping by utilizing thread-blocking wait queues that yield the CPU until the PIC fires an IRQ.
+- **User space transition:** Small syscall layer plus a freestanding `init.elf` program. The kernel builds a secure IRETQ stack frame to drop the CPU into Ring 3, dynamically updating the TSS `rsp0` pointer on context switches to ensure every user thread maintains a unique, isolated kernel stack for trap handling.
+- **Storage and filesystem:** Interrupt-driven ATA block device driver, MBR parsing, ext2 detection, inode/directory traversal, and file reads.
+- **Testing & Verification:** Automated traversal of the ext2 filesystem that computes the MD5 hash of read files to prove driver accuracy and data integrity against disk corruption.
+- **Program loading:** ELF64 loader that parses program headers, maps segments directly into a distinct user address space, and starts execution.
 
 ## Memory Architecture
 
