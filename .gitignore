@@ -55,3 +55,7 @@ dkms.conf
 # Build directory
 build/
 .vscode/
+
+# Docs for now
+docs/
+notes.md

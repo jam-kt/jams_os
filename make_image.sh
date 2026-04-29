@@ -7,6 +7,7 @@ IMG="$1"
 KERNEL_BIN="$2"
 GRUB_CFG="$3"
 USER_BIN="$4"
+shift 4
 
 # create an image and partition it (to make a virtual hard drive for the OS)
 # there should be 32768 sectors on the image 
@@ -35,8 +36,11 @@ sudo mkdir -p /mnt/osfiles/boot/grub
 sudo cp "$KERNEL_BIN" /mnt/osfiles/boot/kernel.img
 sudo cp "$GRUB_CFG" /mnt/osfiles/boot/grub/grub.cfg
 
-# copy userspace program to root of the ext2 fs
+# copy userspace programs to root of the ext2 fs
 sudo cp "$USER_BIN" /mnt/osfiles/init.elf
+for bin in "$@"; do
+    sudo cp "$bin" "/mnt/osfiles/$(basename "$bin")"
+done
 
 echo "test file to verify the filesystem driver" | sudo tee /mnt/osfiles/test.txt > /dev/null
 

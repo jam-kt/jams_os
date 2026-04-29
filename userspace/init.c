@@ -1,90 +1,51 @@
 #include <stdint-gcc.h>
 
-#define SYS_KEXIT 1
-#define SYS_GETC  2
-#define SYS_PUTC  3
+#include <userlib.h>
 
-static inline uint64_t syscall0(uint64_t num) 
+static void test_fork_exec_wait(void)
 {
-    uint64_t ret;
-    asm volatile (
-        "movq %1, %%rax\n"
-        "int $128\n"
-        "movq %%rax, %0"
-        : "=r"(ret) 
-        : "r"(num) 
-        : "rax", "rcx", "r11", "memory"
-    );
-    return ret;
-}
+    int status = -1;
+    uint64_t pid;
+    uint64_t waited;
 
-static inline uint64_t syscall1(uint64_t num, uint64_t a1) 
-{
-    uint64_t ret;
-    asm volatile (
-        "movq %1, %%rax\n"
-        "movq %2, %%rdi\n"
-        "int $128\n"
-        "movq %%rax, %0"
-        : "=r"(ret) 
-        : "r"(num), "r"(a1)
-        : "rax", "rdi", "rcx", "r11", "memory"
-    );
-    return ret;
-}
+    puts("\ninit: forking child\n");
+    pid = fork();
 
-void putc(char c) 
-{
-    syscall1(SYS_PUTC, (uint64_t)c);
-}
+    if (pid == 0) {
+        puts("child: exec echo.elf\n");
+        if (exec("echo.elf") == (uint64_t)-1) {
+            puts("child: exec failed\n");
+            exit(1);
+        }
+    }
 
-char getc() 
-{
-    return (char)syscall0(SYS_GETC);
-}
+    puts("init: waiting for child ");
+    putnum(pid);
+    putc('\n');
 
-void kexit() 
-{
-    syscall0(SYS_KEXIT);
-}
-
-static void trigger_fault_isr()
-{
-    asm volatile("int $13");
-}
-
-static void trigger_fault_page()
-{
-    volatile uint64_t x = *(volatile uint64_t *)0x1000;
-    (void)x;
+    waited = wait(&status);
+    puts("init: wait returned pid ");
+    putnum(waited);
+    puts(" status ");
+    putnum((uint64_t)status);
+    putc('\n');
 }
 
 int main(void) 
 {
-    putc('H');
-    putc('e');
-    putc('l');
-    putc('l');
-    putc('o');
-    putc('\n');
-
+    puts("init.elf ready\n");
+    puts("1: fork + exec echo.elf + wait\n");
+    puts("echo.elf exits when you type q\n\n");
+    
     while (1) {
         char c = getc();
 
         if (c == '1') {
-            trigger_fault_isr();
-        } else if (c == '2') {
-            trigger_fault_page();
+            test_fork_exec_wait();
+        } else {
+            putc(c);
         }
-
-        putc(c);
     }
     
     return 0;
-}
-
-/* entry point expected by linker */
-void _start(void) 
-{
-    main();
 }

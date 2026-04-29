@@ -219,18 +219,6 @@ Useful places to set early breakpoints include:
 - `PROC_create_uthread`
 - `elf_load`
 
-## Further Reading
-
-I plan to add implementation writeups and notes for the subsystems below:
-
-- [Boot Process and Entering Long Mode](#)
-- [Interrupts, IDT, and Fault Handling](#)
-- [Physical Memory and Paging Design](#)
-- [Scheduler and Context Switching](#)
-- [ATA, MBR Parsing, and ext2 Integration](#)
-- [ELF Loading and Starting User Space](#)
-- [Lessons Learned While Building the Kernel](#)
-
 ## Status
 
 This is an active personal learning project and a long-term systems playground.

@@ -25,12 +25,13 @@ grub_cfg := src/$(arch)/grub.cfg
 MAKE_IMAGE_SCRIPT := ./make_image.sh
 
 # userspace stuff
-user_bin := build/init.elf
+user_bins := build/init.elf build/echo.elf
+user_libs := userspace/lib/crt0.c userspace/lib/syscall.c
 user_linker_script := userspace/user_linker.ld
 
 .PHONY: all clean run img
 
-all: $(kernel_bin) $(user_bin)
+all: $(kernel_bin) $(user_bins)
 
 clean:
 	@rm -rf build
@@ -40,17 +41,18 @@ run: $(img)
 
 img: $(img)
 
-$(img): $(kernel_bin) $(user_bin)
-	@$(MAKE_IMAGE_SCRIPT) $(img) $(kernel_bin) $(grub_cfg) $(user_bin)
+$(img): $(kernel_bin) $(user_bins)
+	@$(MAKE_IMAGE_SCRIPT) $(img) $(kernel_bin) $(grub_cfg) $(user_bins)
 
 $(kernel_bin): $(asm_obj_files) $(c_obj_files) $(linker_script)
 	@ld -n -T $(linker_script) -o $(kernel_bin) $(asm_obj_files) $(c_obj_files)
 
-# Rule to compile the user-space program
-$(user_bin): userspace/init.c $(user_linker_script)
+# Rule to compile user-space programs
+build/%.elf: userspace/%.c $(user_libs) $(user_linker_script)
 	@mkdir -p $(dir $@)
 	$(CC) -Wall -Werror -std=gnu99 -g -mno-red-zone -ffreestanding \
-	-nostdlib -mcmodel=large -T $(user_linker_script) $< -o $@
+	-Iuserspace/include -nostdlib -mcmodel=large -T $(user_linker_script) \
+	$(user_libs) $< -o $@
 
 # Generic rule for compiling C files that preserves their relative path.
 build/%.o: %.c
