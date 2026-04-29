@@ -212,6 +212,25 @@ void MMU_pf_free(void *pf)
     free_frames = (struct pf_header *)header;
 }
 
+uint64_t MMU_pf_free_count(void)
+{
+    uint64_t count = 0;
+
+    for (int i = 0; i < MAX_REGIONS; i++) {
+        if (usable_regions[i].valid) {
+            count += usable_regions[i].size / PAGE_SIZE;
+        }
+    }
+
+    for (struct pf_header *node = free_frames;
+         node != (struct pf_header *)INVALID_FRAME_ADDR;
+         node = node->next) {
+        count++;
+    }
+
+    return count;
+}
+
 void frames_sequence_test()
 {
     void *p1, *p2, *p3, *p4, *p5, *p6;

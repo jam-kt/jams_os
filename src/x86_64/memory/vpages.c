@@ -13,15 +13,25 @@
 /* kernel space page table and one p3 table for the identity map */
 static struct p4_entry ptable_p4[512] __attribute__((aligned(4096)));
 static struct p3_entry ptable_p3_identity[512] __attribute__((aligned(4096)));
+static uint64_t kernel_cr3 = 0;
 
 /* increasing vitrtual address "counter" */
 static uint64_t kernel_va = VA_KHEAP_BASE;
 
 
 static struct p1_entry *travel_pagetable(uint64_t va, int create);
+static inline void *phys_to_virt(uint64_t phys_addr);
 static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2, int user);
 static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3, int user);
 static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4, int user);
+static int page_table_empty(void *table);
+static void free_empty_tables(uint64_t va);
+static void destroy_userspace_PT(struct p1_entry *pt);
+static void destroy_userspace_PD(struct p2_entry *pd);
+static void destroy_userspace_PDPT(struct p3_entry *pdpt);
+static int clone_userspace_PT(struct p1_entry *dst, struct p1_entry *src);
+static int clone_userspace_PD(struct p2_entry *dst, struct p2_entry *src);
+static int clone_userspace_PDPT(struct p3_entry *dst, struct p3_entry *src);
 static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg);
 
 
@@ -34,6 +44,11 @@ static inline uint64_t phys_to_pfn(uint64_t phys_addr)
 static inline uint64_t pfn_to_phys(uint64_t pfn)
 {
     return (pfn << 12);
+}
+
+static inline void *phys_to_virt(uint64_t phys_addr)
+{
+    return (void *)(VA_PHYS_BASE + phys_addr);
 }
 
 /* 
@@ -60,7 +75,7 @@ static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4, int user)
 
     uint64_t pdpt_phys = pfn_to_phys((uint64_t)e4->p3_addr);
 
-    return (struct p3_entry *)(VA_PHYS_BASE + pdpt_phys);
+    return (struct p3_entry *)phys_to_virt(pdpt_phys);
 }
 
 /* 
@@ -87,7 +102,7 @@ static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3, int user)
 
     uint64_t pd_phys = pfn_to_phys((uint64_t)e3->p2_addr);
 
-    return (struct p2_entry *)(VA_PHYS_BASE + pd_phys);
+    return (struct p2_entry *)phys_to_virt(pd_phys);
 }
 
 /* 
@@ -113,7 +128,7 @@ static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2, int user)
 
     uint64_t pt_phys = pfn_to_phys((uint64_t)e2->p1_addr);
 
-    return (struct p1_entry *)(VA_PHYS_BASE + pt_phys);
+    return (struct p1_entry *)phys_to_virt(pt_phys);
 }
 
 /*
@@ -134,7 +149,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
     uint64_t cr3 = 0;
     asm volatile("mov %0, cr3" : "=r" (cr3));
     struct p4_entry *curr_p4_table = NULL; 
-    curr_p4_table = (struct p4_entry *)(VA_PHYS_BASE + (cr3 & PAGE_MASK)); 
+    curr_p4_table = (struct p4_entry *)phys_to_virt(cr3 & PAGE_MASK); 
 
     struct p4_entry *e4 = &curr_p4_table[idx4];
     struct p3_entry *pdpt;
@@ -150,6 +165,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
                 return INVALID_FRAME_ADDR;
             }
         } else {
+            printk("Failed to find P3 table\n");
             return INVALID_FRAME_ADDR;
         }
     } else {
@@ -171,6 +187,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
                 return INVALID_FRAME_ADDR;
             }
         } else {
+            printk("Failed to alloc P2 table\n");
             return INVALID_FRAME_ADDR;
         }
     } else {
@@ -192,6 +209,7 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
                 return INVALID_FRAME_ADDR;
             }
         } else {
+            printk("Failed to alloc P1 table\n");
             return INVALID_FRAME_ADDR;
         }
     } else {
@@ -200,6 +218,63 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
     
     /* the p1 entry for the given VA */
     return &pt[idx1];
+}
+
+static int page_table_empty(void *table)
+{
+    uint64_t *entries = table;
+
+    for (int i = 0; i < 512; i++) {
+        if (entries[i] != 0) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static void free_empty_tables(uint64_t va)
+{
+    uint64_t cr3 = 0;
+    asm volatile("mov %0, cr3" : "=r" (cr3));
+
+    struct p4_entry *p4 = (struct p4_entry *)phys_to_virt(cr3 & PAGE_MASK);
+    struct p4_entry *e4 = &p4[PML4_INDEX(va)];
+    if (!e4->present || !e4->allocated) {
+        return;
+    }
+
+    uint64_t pdpt_phys = pfn_to_phys((uint64_t)e4->p3_addr);
+    struct p3_entry *pdpt = (struct p3_entry *)phys_to_virt(pdpt_phys);
+    struct p3_entry *e3 = &pdpt[PDP_INDEX(va)];
+    if (!e3->present || e3->big_page || !e3->allocated) {
+        return;
+    }
+
+    uint64_t pd_phys = pfn_to_phys((uint64_t)e3->p2_addr);
+    struct p2_entry *pd = (struct p2_entry *)phys_to_virt(pd_phys);
+    struct p2_entry *e2 = &pd[PD_INDEX(va)];
+    if (!e2->present || e2->big_page || !e2->allocated) {
+        return;
+    }
+
+    uint64_t pt_phys = pfn_to_phys((uint64_t)e2->p1_addr);
+    struct p1_entry *pt = (struct p1_entry *)phys_to_virt(pt_phys);
+
+    if (page_table_empty(pt)) {
+        MMU_pf_free((void *)pt_phys);
+        memset(e2, 0, sizeof(*e2));
+    }
+
+    if (page_table_empty(pd)) {
+        MMU_pf_free((void *)pd_phys);
+        memset(e3, 0, sizeof(*e3));
+    }
+
+    if (page_table_empty(pdpt)) {
+        MMU_pf_free((void *)pdpt_phys);
+        memset(e4, 0, sizeof(*e4));
+    }
 }
 
 /* creates an identity mapping for the first 512 GB */
@@ -227,6 +302,7 @@ static void make_identity_map(void)
     ptable_p4[0].allocated  = 1;
 
     /* load the new page table into cr3 reg */
+    kernel_cr3 = (uint64_t)&ptable_p4;
     asm volatile("mov cr3, %0" : : "r" (&ptable_p4) : "memory");
 }
 
@@ -241,7 +317,7 @@ uint64_t MMU_create_user_p4(void)
     }
 
     /* use the identity map to access the alloced page */
-    struct p4_entry *new_p4 = (struct p4_entry *)(VA_PHYS_BASE + (uint64_t)p4);
+    struct p4_entry *new_p4 = (struct p4_entry *)phys_to_virt((uint64_t)p4);
     memset(new_p4, 0, PAGE_SIZE);
 
     /* copy the kernel P4 entries (slots 0-15) into the new P4 table */
@@ -250,6 +326,11 @@ uint64_t MMU_create_user_p4(void)
     }
 
     return (uint64_t)p4;
+}
+
+uint64_t MMU_get_kernel_p4(void)
+{
+    return kernel_cr3;
 }
 
 /* reserve a virtual page using demand paging */
@@ -279,6 +360,9 @@ void *MMU_alloc_page(void)
     
     uint64_t va = kernel_va;
     if (demand_page(va) < 0) {
+        if (ints_enabled) {
+            STI();
+        }
         return NULL;
     }
 
@@ -299,6 +383,9 @@ void *MMU_alloc_pages(int num)
     uint64_t base = kernel_va;
     for (int i = 0; i < num; i++) {
         if (demand_page(base + i * PAGE_SIZE) < 0) {
+            if (ints_enabled) {
+                STI();
+            }
             return NULL;
         }
     }
@@ -325,6 +412,9 @@ void *MMU_alloc_at(uint64_t vaddr, uint64_t size)
     for (int i = 0; i < num_pages; i++) {
         if (demand_page(base + (i * PAGE_SIZE)) < 0) {
             printk("MMU_alloc_at: could not alloc at %p\n", (void *)vaddr);
+            if (ints_enabled) {
+                STI();
+            }
             return NULL;
         }
     }
@@ -336,10 +426,6 @@ void *MMU_alloc_at(uint64_t vaddr, uint64_t size)
     return (void *)base;
 }
 
-/* 
- * currently the frames allocated to store the page tables are not freed. 
- * the frames that are mapped to a VA and given out are freed.
- */
 void MMU_free_page(void *vaddr) 
 {
     /* get rid of inter page offset */
@@ -356,11 +442,13 @@ void MMU_free_page(void *vaddr)
         MMU_pf_free(phys_frame);
     }
 
-    /* clear the p1 entry present bit */
-    p1->present = 0;
+    /* clear the full p1 entry so no demand reservation survives the free */
+    memset(p1, 0, sizeof(*p1));
 
     /* tell CPU that the translation for vaddr is no longer valid */
     asm volatile("invlpg [%0]" : : "r"(vaddr) : "memory");
+
+    free_empty_tables(va);
 }
 
 void MMU_free_pages(void *vaddr, int num) 
@@ -369,6 +457,274 @@ void MMU_free_pages(void *vaddr, int num)
     for (int i = 0; i < num; i++) {
         MMU_free_page((void *)(base + i * PAGE_SIZE));
     }
+}
+
+static void destroy_userspace_PT(struct p1_entry *pt)
+{
+    for (int i = 0; i < 512; i++) {
+        if (!pt[i].present && !pt[i].demand) {
+            continue;
+        }
+
+        if (pt[i].present) {
+            void *phys_frame = (void *)pfn_to_phys(pt[i].phys_addr);
+            MMU_pf_free(phys_frame);
+        }
+
+        memset(&pt[i], 0, sizeof(pt[i]));
+    }
+}
+
+static void destroy_userspace_PD(struct p2_entry *pd)
+{
+    for (int i = 0; i < 512; i++) {
+        if (!pd[i].present) {
+            continue;
+        }
+
+        if (pd[i].big_page) {
+            printk("MMU_destroy_userspace: unexpected 2MiB user page\n");
+            asm volatile("cli");
+            asm volatile("hlt");
+        }
+
+        uint64_t pt_phys = pfn_to_phys((uint64_t)pd[i].p1_addr);
+        struct p1_entry *pt = (struct p1_entry *)phys_to_virt(pt_phys);
+
+        destroy_userspace_PT(pt);
+        MMU_pf_free((void *)pt_phys);
+        memset(&pd[i], 0, sizeof(pd[i]));
+    }
+}
+
+static void destroy_userspace_PDPT(struct p3_entry *pdpt)
+{
+    for (int i = 0; i < 512; i++) {
+        if (!pdpt[i].present) {
+            continue;
+        }
+
+        if (pdpt[i].big_page) {
+            printk("MMU_destroy_userspace: unexpected 1GiB user page\n");
+            asm volatile("cli");
+            asm volatile("hlt");
+        }
+
+        uint64_t pd_phys = pfn_to_phys((uint64_t)pdpt[i].p2_addr);
+        struct p2_entry *pd = (struct p2_entry *)phys_to_virt(pd_phys);
+
+        destroy_userspace_PD(pd);
+        MMU_pf_free((void *)pd_phys);
+        memset(&pdpt[i], 0, sizeof(pdpt[i]));
+    }
+}
+
+void MMU_destroy_userspace(uint64_t cr3)
+{
+    int ints_enabled = are_interrupts_enabled();
+    CLI();
+    uint64_t current_cr3 = 0;
+
+    asm volatile("mov %0, cr3" : "=r" (current_cr3));
+
+    if ((cr3 & PAGE_MASK) == 0) {
+        if (ints_enabled) {
+            STI();
+        }
+        return;
+    }
+
+    if ((cr3 & PAGE_MASK) == (kernel_cr3 & PAGE_MASK)) {
+        printk("MMU_destroy_userspace: refusing to free kernel page table\n");
+        if (ints_enabled) {
+            STI();
+        }
+        return;
+    }
+
+    if ((cr3 & PAGE_MASK) == (current_cr3 & PAGE_MASK)) {
+        printk("MMU_destroy_userspace: refusing to free current page table\n");
+        if (ints_enabled) {
+            STI();
+        }
+        return;
+    }
+
+    /* kernel entries live in the lower P4 slots, so only walk user space */
+    uint64_t p4_phys = cr3 & PAGE_MASK;
+    struct p4_entry *p4 = (struct p4_entry *)phys_to_virt(p4_phys);
+
+    for (int i = PML4_INDEX(VA_USER_BASE); i < 512; i++) {
+        if (!p4[i].present) {
+            continue;
+        }
+
+        uint64_t pdpt_phys = pfn_to_phys((uint64_t)p4[i].p3_addr);
+        struct p3_entry *pdpt = (struct p3_entry *)phys_to_virt(pdpt_phys);
+
+        destroy_userspace_PDPT(pdpt);
+        MMU_pf_free((void *)pdpt_phys);
+        memset(&p4[i], 0, sizeof(p4[i]));
+    }
+
+    MMU_pf_free((void *)p4_phys);
+
+    if (ints_enabled) {
+        STI();
+    }
+}
+
+static int clone_userspace_PT(struct p1_entry *dst, struct p1_entry *src)
+{
+    for (int i = 0; i < 512; i++) {
+        if (!src[i].present && !src[i].demand) {
+            continue;
+        }
+
+        dst[i] = src[i];
+
+        if (src[i].present) {
+            void *new_frame = MMU_pf_alloc();
+            if (new_frame == INVALID_FRAME_ADDR) {
+                memset(&dst[i], 0, sizeof(dst[i]));
+                return -1;
+            }
+
+            uint64_t src_phys = pfn_to_phys(src[i].phys_addr);
+            memcpy(phys_to_virt((uint64_t)new_frame), phys_to_virt(src_phys),
+                   PAGE_SIZE);
+            dst[i].phys_addr = phys_to_pfn((uint64_t)new_frame);
+        }
+    }
+
+    return 0;
+}
+
+static int clone_userspace_PD(struct p2_entry *dst, struct p2_entry *src)
+{
+    for (int i = 0; i < 512; i++) {
+        if (!src[i].present) {
+            continue;
+        }
+
+        if (src[i].big_page) {
+            printk("MMU_clone_userspace: unexpected 2MiB user page\n");
+            return -1;
+        }
+
+        void *pt_frame = MMU_pf_alloc();
+        if (pt_frame == INVALID_FRAME_ADDR) {
+            return -1;
+        }
+        memset(phys_to_virt((uint64_t)pt_frame), 0, PAGE_SIZE);
+
+        dst[i] = src[i];
+        dst[i].p1_addr = phys_to_pfn((uint64_t)pt_frame);
+
+        uint64_t src_pt_phys = pfn_to_phys((uint64_t)src[i].p1_addr);
+        struct p1_entry *src_pt = (struct p1_entry *)phys_to_virt(src_pt_phys);
+        struct p1_entry *dst_pt = (struct p1_entry *)phys_to_virt((uint64_t)pt_frame);
+
+        if (clone_userspace_PT(dst_pt, src_pt) < 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int clone_userspace_PDPT(struct p3_entry *dst, struct p3_entry *src)
+{
+    for (int i = 0; i < 512; i++) {
+        if (!src[i].present) {
+            continue;
+        }
+
+        if (src[i].big_page) {
+            printk("MMU_clone_userspace: unexpected 1GiB user page\n");
+            return -1;
+        }
+
+        void *pd_frame = MMU_pf_alloc();
+        if (pd_frame == INVALID_FRAME_ADDR) {
+            return -1;
+        }
+        memset(phys_to_virt((uint64_t)pd_frame), 0, PAGE_SIZE);
+
+        dst[i] = src[i];
+        dst[i].p2_addr = phys_to_pfn((uint64_t)pd_frame);
+
+        uint64_t src_pd_phys = pfn_to_phys((uint64_t)src[i].p2_addr);
+        struct p2_entry *src_pd = (struct p2_entry *)phys_to_virt(src_pd_phys);
+        struct p2_entry *dst_pd = (struct p2_entry *)phys_to_virt((uint64_t)pd_frame);
+
+        if (clone_userspace_PD(dst_pd, src_pd) < 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+uint64_t MMU_clone_userspace(uint64_t cr3)
+{
+    int ints_enabled = are_interrupts_enabled();
+    CLI();
+
+    if ((cr3 & PAGE_MASK) == 0 || (cr3 & PAGE_MASK) == (kernel_cr3 & PAGE_MASK)) {
+        if (ints_enabled) {
+            STI();
+        }
+        return 0;
+    }
+
+    uint64_t child_cr3 = MMU_create_user_p4();
+    if (child_cr3 == 0) {
+        if (ints_enabled) {
+            STI();
+        }
+        return 0;
+    }
+
+    struct p4_entry *src_p4 = (struct p4_entry *)phys_to_virt(cr3 & PAGE_MASK);
+    struct p4_entry *dst_p4 = (struct p4_entry *)phys_to_virt(child_cr3 & PAGE_MASK);
+
+    for (int i = PML4_INDEX(VA_USER_BASE); i < 512; i++) {
+        if (!src_p4[i].present) {
+            continue;
+        }
+
+        void *pdpt_frame = MMU_pf_alloc();
+        if (pdpt_frame == INVALID_FRAME_ADDR) {
+            MMU_destroy_userspace(child_cr3);
+            if (ints_enabled) {
+                STI();
+            }
+            return 0;
+        }
+        memset(phys_to_virt((uint64_t)pdpt_frame), 0, PAGE_SIZE);
+
+        dst_p4[i] = src_p4[i];
+        dst_p4[i].p3_addr = phys_to_pfn((uint64_t)pdpt_frame);
+
+        uint64_t src_pdpt_phys = pfn_to_phys((uint64_t)src_p4[i].p3_addr);
+        struct p3_entry *src_pdpt = (struct p3_entry *)phys_to_virt(src_pdpt_phys);
+        struct p3_entry *dst_pdpt = (struct p3_entry *)phys_to_virt((uint64_t)pdpt_frame);
+
+        if (clone_userspace_PDPT(dst_pdpt, src_pdpt) < 0) {
+            MMU_destroy_userspace(child_cr3);
+            if (ints_enabled) {
+                STI();
+            }
+            return 0;
+        }
+    }
+
+    if (ints_enabled) {
+        STI();
+    }
+
+    return child_cr3;
 }
 
 /* TLB should automatically flush after a page fault */
