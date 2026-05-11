@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint-gcc.h>
 
-#define DEFAULT_STACK_BYTES (8 * 1024 * 1024)   /* binary 8MB */
+#define DEFAULT_STACK_BYTES (8 * 1024)   /* binary 16KB */
 
 typedef void (*kproc_t)(void *);
 struct inode;
