@@ -128,9 +128,7 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
     sched->admit(new_proc);
 }
 
-/* a new user page table must be created and passed through arg 3.
- * The calling context for this function must temporarily use that page table
- */
+/* a new user page table must be created and passed through arg 3. */
 int PROC_create_uthread(kproc_t entry_point, void *arg, uint64_t cr3,
                         void *ustack)
 {

@@ -78,7 +78,7 @@ static uint64_t syscall_exit(struct syscall_frame *frame)
     if (exiting->cr3 && exiting->cr3 != MMU_get_kernel_p4()) {
         uint64_t old_cr3 = exiting->cr3;
         uint64_t kernel_cr3 = MMU_get_kernel_p4();
-        asm volatile("mov cr3, %0" : : "r" (kernel_cr3) : "memory");
+        MMU_switch_p4(kernel_cr3);
         exiting->cr3 = 0;
         MMU_destroy_userspace(old_cr3);
     }
@@ -160,7 +160,7 @@ static uint64_t syscall_exec(struct syscall_frame *frame)
     CLI();
     curr_proc->cr3 = image.cr3;
     curr_proc->ustack = (uint64_t *)image.ustack_base;
-    asm volatile("mov cr3, %0" : : "r" (image.cr3) : "memory");
+    MMU_switch_p4(image.cr3);
     if (old_cr3 && old_cr3 != MMU_get_kernel_p4() && old_cr3 != image.cr3) {
         MMU_destroy_userspace(old_cr3);
     }

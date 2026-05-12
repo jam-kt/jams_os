@@ -19,6 +19,8 @@ static uint64_t kernel_cr3 = 0;
 static uint64_t kernel_va = VA_KHEAP_BASE;
 
 
+static struct p1_entry *travel_pagetable_in(uint64_t cr3, uint64_t va,
+                                            int create);
 static struct p1_entry *travel_pagetable(uint64_t va, int create);
 static inline void *phys_to_virt(uint64_t phys_addr);
 static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2, int user);
@@ -26,6 +28,13 @@ static struct p2_entry *get_or_alloc_PD_entry(struct p3_entry *e3, int user);
 static struct p3_entry *get_or_alloc_PDPT_entry(struct p4_entry *e4, int user);
 static int page_table_empty(void *table);
 static void free_empty_tables(uint64_t va);
+static int demand_page_in(uint64_t cr3, uint64_t va);
+static void *reserve_pages_at(uint64_t cr3, uint64_t vaddr, uint64_t size);
+static void *reserve_pages_checked(uint64_t cr3, uint64_t vaddr,
+                                   uint64_t size, const char *caller);
+static int make_page_present(struct p1_entry *p1, uint64_t va);
+static int write_user_range_as(uint64_t cr3, uint64_t dst, const void *src,
+                               size_t len, int zero);
 static void destroy_userspace_PT(struct p1_entry *pt);
 static void destroy_userspace_PD(struct p2_entry *pd);
 static void destroy_userspace_PDPT(struct p3_entry *pdpt);
@@ -132,11 +141,12 @@ static struct p1_entry *get_or_alloc_PT_entry(struct p2_entry *e2, int user)
 }
 
 /*
- * Will walk the virtual 4-level page table to return the p1_entry associated
- * with a given virtual address. if create = CREATE_MODE then the function
- * will allocate page table entries missing in the path to the virtual addr
+ * Walk the virtual 4-level page table rooted at cr3 and return the p1_entry
+ * associated with a given virtual address. if create = CREATE_MODE then the
+ * function will allocate page table entries missing in the path.
  */
-static struct p1_entry *travel_pagetable(uint64_t va, int create)
+static struct p1_entry *travel_pagetable_in(uint64_t cr3, uint64_t va,
+                                            int create)
 {
     int is_user = (va >= VA_USER_BASE) ? 1 : 0;
 
@@ -145,9 +155,6 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
     uint16_t idx2 = PD_INDEX(va);
     uint16_t idx1 = PT_INDEX(va);
 
-    /* get current P4 table from cr3 reg */
-    uint64_t cr3 = 0;
-    asm volatile("mov %0, cr3" : "=r" (cr3));
     struct p4_entry *curr_p4_table = NULL; 
     curr_p4_table = (struct p4_entry *)phys_to_virt(cr3 & PAGE_MASK); 
 
@@ -220,6 +227,15 @@ static struct p1_entry *travel_pagetable(uint64_t va, int create)
     return &pt[idx1];
 }
 
+/*
+ * Will walk the current virtual 4-level page table to return the p1_entry
+ * associated with a given virtual address.
+ */
+static struct p1_entry *travel_pagetable(uint64_t va, int create)
+{
+    return travel_pagetable_in(MMU_current_p4(), va, create);
+}
+
 static int page_table_empty(void *table)
 {
     uint64_t *entries = table;
@@ -235,8 +251,7 @@ static int page_table_empty(void *table)
 
 static void free_empty_tables(uint64_t va)
 {
-    uint64_t cr3 = 0;
-    asm volatile("mov %0, cr3" : "=r" (cr3));
+    uint64_t cr3 = MMU_current_p4();
 
     struct p4_entry *p4 = (struct p4_entry *)phys_to_virt(cr3 & PAGE_MASK);
     struct p4_entry *e4 = &p4[PML4_INDEX(va)];
@@ -320,8 +335,8 @@ uint64_t MMU_create_user_p4(void)
     struct p4_entry *new_p4 = (struct p4_entry *)phys_to_virt((uint64_t)p4);
     memset(new_p4, 0, PAGE_SIZE);
 
-    /* copy the kernel P4 entries (slots 0-15) into the new P4 table */
-    for (int i = 0; i < 16; i++) {
+    /* copy all kernel P4 entries below the first user-space slot */
+    for (int i = 0; i < PML4_INDEX(VA_USER_BASE); i++) {
         new_p4[i] = ptable_p4[i];
     }
 
@@ -333,10 +348,22 @@ uint64_t MMU_get_kernel_p4(void)
     return kernel_cr3;
 }
 
-/* reserve a virtual page using demand paging */
-static int demand_page(uint64_t va)
+uint64_t MMU_current_p4(void)
 {
-    struct p1_entry *p1 = travel_pagetable(va, CREATE_MODE);
+    uint64_t cr3 = 0;
+    asm volatile("mov %0, cr3" : "=r" (cr3));
+    return cr3;
+}
+
+void MMU_switch_p4(uint64_t cr3)
+{
+    asm volatile("mov cr3, %0" : : "r" (cr3) : "memory");
+}
+
+/* reserve a virtual page using demand paging */
+static int demand_page_in(uint64_t cr3, uint64_t va)
+{
+    struct p1_entry *p1 = travel_pagetable_in(cr3, va, CREATE_MODE);
     if (p1 == INVALID_FRAME_ADDR) {
         printk("demand_page: bad p1 entry given\n");
         return -1;
@@ -350,6 +377,108 @@ static int demand_page(uint64_t va)
     p1->present = 0;
     p1->phys_addr = 0;
     
+    return 0;
+}
+
+/* reserve a virtual page in the current address space using demand paging */
+static int demand_page(uint64_t va)
+{
+    return demand_page_in(MMU_current_p4(), va);
+}
+
+static void *reserve_pages_at(uint64_t cr3, uint64_t vaddr, uint64_t size)
+{
+    uint64_t base = vaddr & PAGE_MASK;
+    uint64_t end = (vaddr + size + PAGE_SIZE - 1) & PAGE_MASK;
+    int num_pages = (end - base) / PAGE_SIZE;
+
+    for (int i = 0; i < num_pages; i++) {
+        if (demand_page_in(cr3, base + (i * PAGE_SIZE)) < 0) {
+            return NULL;
+        }
+    }
+
+    return (void *)base;
+}
+
+static void *reserve_pages_checked(uint64_t cr3, uint64_t vaddr,
+                                   uint64_t size, const char *caller)
+{
+    void *base = reserve_pages_at(cr3, vaddr, size);
+
+    if (!base) {
+        printk("%s: could not alloc at %p\n", caller, (void *)vaddr);
+    }
+
+    return base;
+}
+
+static int make_page_present(struct p1_entry *p1, uint64_t va)
+{
+    if (p1 == INVALID_FRAME_ADDR) {
+        return -1;
+    }
+
+    if (p1->present) {
+        return 0;
+    }
+
+    if (!p1->demand) {
+        return -1;
+    }
+
+    void *phys_frame = MMU_pf_alloc();
+    if (phys_frame == INVALID_FRAME_ADDR) {
+        return -1;
+    }
+
+    memset(phys_to_virt((uint64_t)phys_frame), 0, PAGE_SIZE);
+
+    p1->phys_addr = phys_to_pfn((uint64_t)phys_frame);
+    p1->present = 1;
+    p1->rw      = 1;
+    p1->us      = (va >= VA_USER_BASE) ? 1 : 0;
+    p1->demand  = 0;
+
+    return 0;
+}
+
+static int write_user_range_as(uint64_t cr3, uint64_t dst, const void *src,
+                               size_t len, int zero)
+{
+    const uint8_t *src_bytes = src;
+    size_t done = 0;
+
+    if (!zero && !src && len != 0) {
+        return -1;
+    }
+
+    while (done < len) {
+        uint64_t va = dst + done;
+        uint64_t page_offset = va & (PAGE_SIZE - 1);
+        size_t chunk = PAGE_SIZE - page_offset;
+        struct p1_entry *p1;
+        uint64_t phys;
+
+        if (chunk > len - done) {
+            chunk = len - done;
+        }
+
+        p1 = travel_pagetable_in(cr3, va, WALK_MODE);
+        if (make_page_present(p1, va) < 0) {
+            return -1;
+        }
+
+        phys = pfn_to_phys(p1->phys_addr) + page_offset;
+        if (zero) {
+            memset(phys_to_virt(phys), 0, chunk);
+        } else {
+            memcpy(phys_to_virt(phys), src_bytes + done, chunk);
+        }
+
+        done += chunk;
+    }
+
     return 0;
 }
 
@@ -399,31 +528,69 @@ void *MMU_alloc_pages(int num)
     return (void *)base;
 }
 
-/* only used so the ELF loader can demand a page in high mem regions */
 void *MMU_alloc_at(uint64_t vaddr, uint64_t size) 
 {
     int ints_enabled = are_interrupts_enabled();
-    CLI();
-    
-    uint64_t base = vaddr & PAGE_MASK;
-    uint64_t end = (vaddr + size + PAGE_SIZE - 1) & PAGE_MASK;
-    int num_pages = (end - base) / PAGE_SIZE;
+    void *base;
 
-    for (int i = 0; i < num_pages; i++) {
-        if (demand_page(base + (i * PAGE_SIZE)) < 0) {
-            printk("MMU_alloc_at: could not alloc at %p\n", (void *)vaddr);
-            if (ints_enabled) {
-                STI();
-            }
-            return NULL;
-        }
-    }
+    CLI();
+
+    base = reserve_pages_checked(MMU_current_p4(), vaddr, size,
+                                 "MMU_alloc_at");
 
     if (ints_enabled) {
         STI();
     }
 
-    return (void *)base;
+    return base;
+}
+
+void *MMU_alloc_at_as(uint64_t cr3, uint64_t vaddr, uint64_t size)
+{
+    int ints_enabled = are_interrupts_enabled();
+    void *base;
+
+    CLI();
+
+    base = reserve_pages_checked(cr3, vaddr, size, "MMU_alloc_at_as");
+
+    if (ints_enabled) {
+        STI();
+    }
+
+    return base;
+}
+
+int MMU_copy_to_user_as(uint64_t cr3, uint64_t dst, const void *src, size_t len)
+{
+    int ints_enabled = are_interrupts_enabled();
+    int ret;
+
+    CLI();
+
+    ret = write_user_range_as(cr3, dst, src, len, 0);
+
+    if (ints_enabled) {
+        STI();
+    }
+
+    return ret;
+}
+
+int MMU_zero_user_as(uint64_t cr3, uint64_t dst, size_t len)
+{
+    int ints_enabled = are_interrupts_enabled();
+    int ret;
+
+    CLI();
+
+    ret = write_user_range_as(cr3, dst, NULL, len, 1);
+
+    if (ints_enabled) {
+        STI();
+    }
+
+    return ret;
 }
 
 void MMU_free_page(void *vaddr) 
@@ -740,21 +907,11 @@ static void ISR14_PAGE_FAULT_HANDLER(int vector, int error_code, void *arg)
 
     /* allocate a frame for a demanded virtual page that is not yet present */
     if ((p1 != INVALID_FRAME_ADDR) && p1->demand && !p1->present) {
-        void *phys_frame = MMU_pf_alloc();
-        if (phys_frame == INVALID_FRAME_ADDR) {
+        if (make_page_present(p1, fault_va) < 0) {
             printk("Page fault handler: no more physical frames\n");
             asm volatile("cli");
             asm volatile("hlt");
         }
-
-        memset(phys_frame, 0, PAGE_SIZE);
-
-        /* update the p1 entry to point to the frame */
-        p1->phys_addr = phys_to_pfn((uint64_t)phys_frame);
-        p1->present = 1;        /* frame is now present */
-        p1->rw      = 1;
-        p1->us      = (fault_va >= VA_USER_BASE) ? 1 : 0;
-        p1->demand  = 0;        
     } else {
         /* non-recoverable page fault */
         printk("Page Fault Handler: Unrecoverable page fault\n");

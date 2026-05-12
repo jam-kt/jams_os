@@ -12,8 +12,6 @@
 #include <kernel/elf64.h>
 #include <kernel/multitask.h>
 
-extern proc curr_proc;
-
 /* context struct for dir search callback */
 struct find_ctx {
     const char *target;
@@ -23,18 +21,16 @@ struct find_ctx {
 struct elf_load_ctx {
     struct file *file;
     struct ELF64_head header;
-    uint64_t kernel_cr3;
     uint64_t user_cr3;
-    uint64_t old_proc_cr3;
 };
 
 static struct file *elf_open_file(struct inode *root, const char *filename);
 static int elf_read_header(struct file *f, struct ELF64_head *header);
-static int elf_switch_to_image_space(struct elf_load_ctx *ctx);
-static void elf_restore_kernel_space(struct elf_load_ctx *ctx);
-static int elf_load_segment(struct file *f, struct ELF64_prog_head *ph);
-static int elf_load_segments(struct file *f, struct ELF64_head *header);
-static int elf_alloc_user_stack(struct elf_image *image);
+static int elf_load_segment(struct file *f, struct ELF64_prog_head *ph,
+                            uint64_t cr3);
+static int elf_load_segments(struct file *f, struct ELF64_head *header,
+                             uint64_t cr3);
+static int elf_alloc_user_stack(struct elf_image *image, uint64_t cr3);
 
 /* cb function to find a file by name in a directory */
 static int find_file_cb(const char *name, struct inode *inode, void *p) 
@@ -99,66 +95,71 @@ static int elf_read_header(struct file *f, struct ELF64_head *header)
     return 0;
 }
 
-static int elf_switch_to_image_space(struct elf_load_ctx *ctx)
+static int elf_load_segment(struct file *f, struct ELF64_prog_head *ph,
+                            uint64_t cr3)
 {
-    asm volatile("mov %0, cr3" : "=r" (ctx->kernel_cr3));
-    ctx->user_cr3 = MMU_create_user_p4();
-    if (ctx->user_cr3 == 0) {
-        printk("ELF Error: failed to create user page table\n");
-        return -1;
-    }
+    uint8_t *bounce = NULL;
+    uint64_t remaining;
+    uint64_t dst;
 
-    CLI();
-    asm volatile("mov cr3, %0" : : "r" (ctx->user_cr3) : "memory");
-    if (curr_proc) {
-        ctx->old_proc_cr3 = curr_proc->cr3;
-        curr_proc->cr3 = ctx->user_cr3;
-    }
-    STI();
-
-    return 0;
-}
-
-static void elf_restore_kernel_space(struct elf_load_ctx *ctx)
-{
-    CLI();
-    asm volatile("mov cr3, %0" : : "r" (ctx->kernel_cr3) : "memory");
-    if (curr_proc) {
-        curr_proc->cr3 = ctx->old_proc_cr3;
-    }
-    STI();
-}
-
-static int elf_load_segment(struct file *f, struct ELF64_prog_head *ph)
-{
     printk("ELF: loading segment to %p (size: %lx)\n", 
            (void *)ph->load_addr, ph->mem_size);
     
     /* demand page */
-    if(MMU_alloc_at(ph->load_addr, ph->mem_size) == NULL) {
+    if (MMU_alloc_at_as(cr3, ph->load_addr, ph->mem_size) == NULL) {
         printk("ELF Error: failed to alloc pages for a segment\n");
         return -1;
     }
 
     /* seek segment data */
     f->lseek(f, ph->file_offset);
-    
-    /* read file_size bytes into memory */
-    if (f->read(f, (void *)ph->load_addr, ph->file_size) != ph->file_size) {
-        printk("ELF Error: failed to read segment data\n");
-        return -1;
+
+    if (ph->file_size > 0) {
+        bounce = kmalloc(PAGE_SIZE);
+        if (!bounce) {
+            printk("ELF Error: failed to allocate segment bounce buffer\n");
+            return -1;
+        }
+    }
+
+    remaining = ph->file_size;
+    dst = ph->load_addr;
+
+    while (remaining > 0) {
+        int chunk = remaining > PAGE_SIZE ? PAGE_SIZE : (int)remaining;
+
+        if (f->read(f, bounce, chunk) != chunk) {
+            printk("ELF Error: failed to read segment data\n");
+            kfree(bounce);
+            return -1;
+        }
+
+        if (MMU_copy_to_user_as(cr3, dst, bounce, chunk) < 0) {
+            printk("ELF Error: failed to copy segment data\n");
+            kfree(bounce);
+            return -1;
+        }
+
+        dst += chunk;
+        remaining -= chunk;
     }
 
     /* handle BSS (uninitialized data) */
     if (ph->mem_size > ph->file_size) {
-        memset((void *)(ph->load_addr + ph->file_size), 0, 
-               ph->mem_size - ph->file_size);
+        if (MMU_zero_user_as(cr3, ph->load_addr + ph->file_size,
+                             ph->mem_size - ph->file_size) < 0) {
+            printk("ELF Error: failed to zero segment data\n");
+            kfree(bounce);
+            return -1;
+        }
     }
 
+    kfree(bounce);
     return 0;
 }
 
-static int elf_load_segments(struct file *f, struct ELF64_head *header)
+static int elf_load_segments(struct file *f, struct ELF64_head *header,
+                             uint64_t cr3)
 {
     struct ELF64_prog_head ph;
     uint64_t current_ph_pos = header->prog_table_pos;
@@ -172,7 +173,7 @@ static int elf_load_segments(struct file *f, struct ELF64_head *header)
         }
 
         /* prog header type = 1. PT_LOAD */
-        if (ph.type == 1 && elf_load_segment(f, &ph) < 0) {
+        if (ph.type == 1 && elf_load_segment(f, &ph, cr3) < 0) {
             return -1;
         }
 
@@ -183,9 +184,9 @@ static int elf_load_segments(struct file *f, struct ELF64_head *header)
     return 0;
 }
 
-static int elf_alloc_user_stack(struct elf_image *image)
+static int elf_alloc_user_stack(struct elf_image *image, uint64_t cr3)
 {
-    void *ustack = MMU_alloc_at(VA_USTACK_BASE, DEFAULT_STACK_BYTES);
+    void *ustack = MMU_alloc_at_as(cr3, VA_USTACK_BASE, DEFAULT_STACK_BYTES);
 
     if (!ustack) {
         printk("ELF Error: failed to allocate user stack\n");
@@ -223,24 +224,25 @@ int elf_load_program(struct inode *root, const char *filename, struct elf_image 
         goto out_close;
     }
 
-    if (elf_switch_to_image_space(&ctx) < 0) {
+    ctx.user_cr3 = MMU_create_user_p4();
+    if (ctx.user_cr3 == 0) {
+        printk("ELF Error: failed to create user page table\n");
         goto out_close;
     }
 
-    if (elf_load_segments(ctx.file, &ctx.header) < 0) {
-        goto out_restore;
+    if (elf_load_segments(ctx.file, &ctx.header, ctx.user_cr3) < 0) {
+        goto out_destroy;
     }
 
-    if (elf_alloc_user_stack(image) < 0) {
-        goto out_restore;
+    if (elf_alloc_user_stack(image, ctx.user_cr3) < 0) {
+        goto out_destroy;
     }
 
     image->cr3 = ctx.user_cr3;
     image->entry = ctx.header.prog_entry_pos;
     ret = 0;
     
-out_restore:
-    elf_restore_kernel_space(&ctx);
+out_destroy:
     if (ret < 0 && ctx.user_cr3) {
         MMU_destroy_userspace(ctx.user_cr3);
     }

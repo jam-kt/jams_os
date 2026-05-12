@@ -1,6 +1,7 @@
 #ifndef __MEMORY_H__
 #define __MEMORY_H__
 
+#include <stddef.h>
 #include <stdint-gcc.h>
 
 void parse_mboot_tags(void *mboot_header);
@@ -11,11 +12,16 @@ void MMU_init(void);
 void *MMU_alloc_page(void);
 void *MMU_alloc_pages(int num);
 void *MMU_alloc_at(uint64_t vaddr, uint64_t size);
+void *MMU_alloc_at_as(uint64_t cr3, uint64_t vaddr, uint64_t size);
 uint64_t MMU_create_user_p4(void);
 uint64_t MMU_get_kernel_p4(void);
+uint64_t MMU_current_p4(void);
+void MMU_switch_p4(uint64_t cr3);
 void MMU_destroy_userspace(uint64_t cr3);
 uint64_t MMU_clone_userspace(uint64_t cr3);
 uint64_t MMU_pf_free_count(void);
+int MMU_copy_to_user_as(uint64_t cr3, uint64_t dst, const void *src, size_t len);
+int MMU_zero_user_as(uint64_t cr3, uint64_t dst, size_t len);
 void MMU_free_page(void *vaddr);
 void MMU_free_pages(void *vaddr, int num);
 void MMU_test(void);

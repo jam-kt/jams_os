@@ -112,10 +112,10 @@ void switch_mmu_and_tss(proc next)
      * unique page table. Kernel threads keep running on the kernel's page table.
      */
     if (next->cr3) {
-        asm volatile("mov cr3, %0" : : "r" (next->cr3) : "memory");
+        MMU_switch_p4(next->cr3);
     } else {
         uint64_t kernel_cr3 = MMU_get_kernel_p4();
-        asm volatile("mov cr3, %0" : : "r" (kernel_cr3) : "memory");
+        MMU_switch_p4(kernel_cr3);
     }
 
 }
