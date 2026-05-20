@@ -19,6 +19,13 @@ static uint64_t syscall_exit(struct syscall_frame *frame);
 static uint64_t syscall_wait(struct syscall_frame *frame);
 static uint64_t syscall_exec(struct syscall_frame *frame);
 static uint64_t syscall_fork(struct syscall_frame *frame);
+static uint64_t syscall_clone(struct syscall_frame *frame);
+static uint64_t syscall_getpid(struct syscall_frame *frame);
+static uint64_t syscall_gettid(struct syscall_frame *frame);
+static uint64_t syscall_thread_exit(struct syscall_frame *frame);
+static uint64_t syscall_thread_join(struct syscall_frame *frame);
+static uint64_t clone_process(struct syscall_frame *frame);
+static uint64_t clone_thread(struct syscall_frame *frame);
 
 /*******************************************************************************
  * PROCESS SYSCALLS
@@ -30,6 +37,11 @@ void PROC_register_syscalls(void)
     register_syscall(SYS_WAIT_NUM, syscall_wait);
     register_syscall(SYS_EXEC_NUM, syscall_exec);
     register_syscall(SYS_FORK_NUM, syscall_fork);
+    register_syscall(SYS_CLONE_NUM, syscall_clone);
+    register_syscall(SYS_GETPID_NUM, syscall_getpid);
+    register_syscall(SYS_GETTID_NUM, syscall_gettid);
+    register_syscall(SYS_THREAD_EXIT_NUM, syscall_thread_exit);
+    register_syscall(SYS_THREAD_JOIN_NUM, syscall_thread_join);
 }
 
 void PROC_set_root(struct inode *root)
@@ -60,73 +72,49 @@ static uint64_t syscall_yield(struct syscall_frame *frame)
 
 static uint64_t syscall_exit(struct syscall_frame *frame)
 {
-    if (curr_proc == NULL) {
-        return 1;
-    }
-
-    proc exiting = curr_proc;
-    if (exiting == PROC_main_proc()) {
-        printk("exit called on main thread, halting\n");
-        __asm__("hlt");
-    }
-
-    exiting->run_state = PROC_ZOMBIE;
-    exiting->exit_status = (int)frame->rdi;
-    PROC_reparent_children(exiting);
-    PROC_remove(exiting);
-
-    if (exiting->cr3 && exiting->cr3 != MMU_get_kernel_p4()) {
-        uint64_t old_cr3 = exiting->cr3;
-        uint64_t kernel_cr3 = MMU_get_kernel_p4();
-        MMU_switch_p4(kernel_cr3);
-        exiting->cr3 = 0;
-        MMU_destroy_userspace(old_cr3);
-    }
-
-    if (exiting->parent) {
-        PROC_unblock_all(&exiting->parent->wait_child_exit);
-    }
-
-    curr_proc = NULL;
-    PROC_reschedule();
-
-    return 0;
+    return (uint64_t)PROC_exit_current_thread((int)frame->rdi, 1);
 }
 
 static uint64_t syscall_wait(struct syscall_frame *frame)
 {
-    if (!curr_proc) {
+    process parent;
+
+    if (!curr_proc || !curr_proc->owner) {
         return (uint64_t)-1;
     }
 
+    parent = curr_proc->owner;
     printk("pre wait count: %lu\n", MMU_pf_free_count());
 
     while (1) {
-        proc child = PROC_find_zombie_child(curr_proc);
+        process child = PROC_find_zombie_child(parent);
         if (child) {
             uint64_t pid = child->pid;
             int *status_ptr = (int *)frame->rdi;
+            proc t = child->threads;
 
             if (status_ptr) {
                 *status_ptr = child->exit_status;
             }
 
-            PROC_unlink_child(curr_proc, child);
-            if (child->kstack) {
-                kfree(child->kstack);
+            PROC_unlink_process_child(parent, child);
+            while (t) {
+                proc next = t->next_thread;
+                PROC_free_thread(t);
+                t = next;
             }
-            kfree(child);
+            PROC_free_process(child);
             printk("post wait count: %lu\n", MMU_pf_free_count());
             return pid;
         }
 
-        if (!curr_proc->first_child) {
+        if (!parent->first_child) {
             return (uint64_t)-1;
         }
 
         CLI();
         curr_proc->run_state = PROC_BLOCKED;
-        PROC_block_on(&curr_proc->wait_child_exit, 1);
+        PROC_block_on(&parent->wait_child_exit, 1);
         CLI();
         if (curr_proc) {
             curr_proc->run_state = PROC_RUNNING;
@@ -140,10 +128,16 @@ static uint64_t syscall_exec(struct syscall_frame *frame)
     char filename[128];
     struct elf_image image;
     uint64_t old_cr3;
+    process owner;
 
     printk("pre exec count: %lu\n", MMU_pf_free_count());
 
-    if (!proc_root || !curr_proc) {
+    if (!proc_root || !curr_proc || !curr_proc->owner) {
+        return (uint64_t)-1;
+    }
+
+    owner = curr_proc->owner;
+    if (owner->live_threads != 1) {
         return (uint64_t)-1;
     }
 
@@ -152,13 +146,13 @@ static uint64_t syscall_exec(struct syscall_frame *frame)
         return (uint64_t)-1;
     }
 
-    old_cr3 = curr_proc->cr3;
+    old_cr3 = owner->cr3;
     if (elf_load_program(proc_root, filename, &image) < 0) {
         return (uint64_t)-1;
     }
 
     CLI();
-    curr_proc->cr3 = image.cr3;
+    owner->cr3 = image.cr3;
     curr_proc->ustack = (uint64_t *)image.ustack_base;
     MMU_switch_p4(image.cr3);
     if (old_cr3 && old_cr3 != MMU_get_kernel_p4() && old_cr3 != image.cr3) {
@@ -179,7 +173,101 @@ static uint64_t syscall_exec(struct syscall_frame *frame)
 
 static uint64_t syscall_fork(struct syscall_frame *frame)
 {
-    proc parent = curr_proc;
+    frame->rdi = CLONE_PROCESS;
+    frame->rsi = 0;
+    frame->rdx = 0;
+    frame->r10 = 0;
+    return syscall_clone(frame);
+}
+
+static uint64_t syscall_clone(struct syscall_frame *frame)
+{
+    if (frame->rdi == CLONE_PROCESS) {
+        return clone_process(frame);
+    }
+
+    if (frame->rdi == CLONE_THREAD) {
+        return clone_thread(frame);
+    }
+
+    return (uint64_t)-1;
+}
+
+static uint64_t syscall_getpid(struct syscall_frame *frame)
+{
+    (void)frame;
+
+    if (!curr_proc || !curr_proc->owner) {
+        return 0;
+    }
+
+    return curr_proc->owner->pid;
+}
+
+static uint64_t syscall_gettid(struct syscall_frame *frame)
+{
+    (void)frame;
+
+    if (!curr_proc) {
+        return 0;
+    }
+
+    return curr_proc->tid;
+}
+
+static uint64_t syscall_thread_exit(struct syscall_frame *frame)
+{
+    return (uint64_t)PROC_exit_current_thread((int)frame->rdi, 0);
+}
+
+static uint64_t syscall_thread_join(struct syscall_frame *frame)
+{
+    uint64_t tid = frame->rdi;
+    int *status_ptr = (int *)frame->rsi;
+    process owner;
+    proc target;
+
+    if (!curr_proc || !curr_proc->owner || tid == curr_proc->tid) {
+        return (uint64_t)-1;
+    }
+
+    owner = curr_proc->owner;
+    target = PROC_find_thread(owner, tid);
+    if (!target) {
+        return (uint64_t)-1;
+    }
+
+    while (target->run_state != PROC_ZOMBIE) {
+        CLI();
+        curr_proc->run_state = PROC_BLOCKED;
+        PROC_block_on(&owner->wait_thread_exit, 1);
+        CLI();
+        if (curr_proc) {
+            curr_proc->run_state = PROC_RUNNING;
+        }
+        STI();
+
+        target = PROC_find_thread(owner, tid);
+        if (!target) {
+            return (uint64_t)-1;
+        }
+    }
+
+    if (status_ptr) {
+        *status_ptr = target->exit_status;
+    }
+
+    PROC_unlink_thread(owner, target);
+    PROC_free_thread(target);
+
+    return tid;
+}
+
+static uint64_t clone_process(struct syscall_frame *frame)
+{
+    proc parent_thread = curr_proc;
+    process parent;
+    process child_process;
     proc child;
     void *kstack;
     uint64_t child_cr3;
@@ -188,7 +276,13 @@ static uint64_t syscall_fork(struct syscall_frame *frame)
 
     printk("pre fork count: %lu\n", MMU_pf_free_count());
 
-    if (!parent || !parent->cr3 || parent->cr3 == MMU_get_kernel_p4()) {
+    if (!parent_thread || !parent_thread->owner) {
+        return (uint64_t)-1;
+    }
+
+    parent = parent_thread->owner;
+    if (!parent->cr3 || parent->cr3 == MMU_get_kernel_p4() ||
+        parent->live_threads != 1) {
         return (uint64_t)-1;
     }
 
@@ -197,36 +291,46 @@ static uint64_t syscall_fork(struct syscall_frame *frame)
         return (uint64_t)-1;
     }
 
+    child_process = kmalloc(sizeof(*child_process));
+    if (!child_process) {
+        MMU_destroy_userspace(child_cr3);
+        return (uint64_t)-1;
+    }
+    memset(child_process, 0, sizeof(*child_process));
+    PROC_init_process(child_process, parent, child_cr3);
+
     child = kmalloc(sizeof(*child));
     if (!child) {
+        kfree(child_process);
         MMU_destroy_userspace(child_cr3);
         return (uint64_t)-1;
     }
     memset(child, 0, sizeof(*child));
+    PROC_init_thread(child, child_process);
 
     kstack = kmalloc(DEFAULT_STACK_BYTES);
     if (!kstack) {
         kfree(child);
+        kfree(child_process);
         MMU_destroy_userspace(child_cr3);
         return (uint64_t)-1;
     }
 
-    frame_offset = (uintptr_t)frame - (uintptr_t)parent->kstack;
+    frame_offset = (uintptr_t)frame - (uintptr_t)parent_thread->kstack;
     if (frame_offset >= DEFAULT_STACK_BYTES) {
         kfree(kstack);
         kfree(child);
+        kfree(child_process);
         MMU_destroy_userspace(child_cr3);
         return (uint64_t)-1;
     }
 
     memcpy((void *)((uintptr_t)kstack + frame_offset),
-           (void *)((uintptr_t)parent->kstack + frame_offset),
+           (void *)((uintptr_t)parent_thread->kstack + frame_offset),
            DEFAULT_STACK_BYTES - frame_offset);
-    PROC_init_fields(child, parent);
     child->kstack = kstack;
-    child->ustack = parent->ustack;
-    child->stacksize = parent->stacksize;
-    child->cr3 = child_cr3;
+    child->ustack = parent_thread->ustack;
+    child->stacksize = parent_thread->stacksize;
     child->run_state = PROC_READY;
 
     /* copy the kernel stack contents and then edit the return value to 0.
@@ -238,10 +342,51 @@ static uint64_t syscall_fork(struct syscall_frame *frame)
     child_frame->rax = 0;
     child->state.rsp = (uint64_t)child_frame;
 
-    PROC_link_child(parent, child);
+    PROC_link_thread(child_process, child);
+    PROC_link_process_child(parent, child_process);
     PROC_admit(child);
 
     printk("post fork count: %lu\n", MMU_pf_free_count());
 
-    return child->pid;
+    return child_process->pid;
+}
+
+static uint64_t clone_thread(struct syscall_frame *frame)
+{
+    process owner;
+    proc child;
+    uint64_t child_stack_top = frame->rsi;
+    kproc_t entry = (kproc_t)frame->rdx;
+    void *arg = (void *)frame->r10;
+
+    if (!curr_proc || !curr_proc->owner || !child_stack_top || !entry) {
+        return (uint64_t)-1;
+    }
+
+    owner = curr_proc->owner;
+    if (!owner->cr3 || owner->cr3 == MMU_get_kernel_p4()) {
+        return (uint64_t)-1;
+    }
+
+    child = kmalloc(sizeof(*child));
+    if (!child) {
+        return (uint64_t)-1;
+    }
+
+    memset(child, 0, sizeof(*child));
+    PROC_init_thread(child, owner);
+    PROC_link_thread(owner, child);
+
+    if (PROC_setup_uthread(child, entry, arg, child_stack_top) < 0) {
+        PROC_unlink_thread(owner, child);
+        if (owner->live_threads > 0) {
+            owner->live_threads--;
+        }
+        PROC_free_thread(child);
+        return (uint64_t)-1;
+    }
+
+    PROC_admit(child);
+
+    return child->tid;
 }

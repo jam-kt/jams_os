@@ -55,5 +55,10 @@ void register_syscall(int sys_num, sys_t handler);
 #define SYS_WAIT_NUM  4
 #define SYS_EXEC_NUM  5
 #define SYS_FORK_NUM  6
+#define SYS_CLONE_NUM 7
+#define SYS_GETPID_NUM 8
+#define SYS_GETTID_NUM 9
+#define SYS_THREAD_EXIT_NUM 10
+#define SYS_THREAD_JOIN_NUM 11
 
 #endif

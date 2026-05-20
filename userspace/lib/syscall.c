@@ -8,6 +8,11 @@
 #define SYS_WAIT 4
 #define SYS_EXEC 5
 #define SYS_FORK 6
+#define SYS_CLONE 7
+#define SYS_GETPID 8
+#define SYS_GETTID 9
+#define SYS_THREAD_EXIT 10
+#define SYS_THREAD_JOIN 11
 
 static inline uint64_t syscall0(uint64_t num) 
 {
@@ -34,6 +39,42 @@ static inline uint64_t syscall1(uint64_t num, uint64_t a1)
         : "=r"(ret) 
         : "r"(num), "r"(a1)
         : "rax", "rdi", "rcx", "r11", "memory"
+    );
+    return ret;
+}
+
+static inline uint64_t syscall2(uint64_t num, uint64_t a1, uint64_t a2) 
+{
+    uint64_t ret;
+    asm volatile (
+        "movq %1, %%rax\n"
+        "movq %2, %%rdi\n"
+        "movq %3, %%rsi\n"
+        "int $128\n"
+        "movq %%rax, %0"
+        : "=r"(ret) 
+        : "r"(num), "r"(a1), "r"(a2)
+        : "rax", "rdi", "rsi", "rcx", "r11", "memory"
+    );
+    return ret;
+}
+
+static inline uint64_t syscall4(uint64_t num, uint64_t a1, uint64_t a2,
+                                uint64_t a3, uint64_t a4)
+{
+    uint64_t ret;
+    register uint64_t r10 asm("r10") = a4;
+
+    asm volatile (
+        "movq %2, %%rax\n"
+        "movq %3, %%rdi\n"
+        "movq %4, %%rsi\n"
+        "movq %5, %%rdx\n"
+        "int $128\n"
+        "movq %%rax, %0"
+        : "=r"(ret), "+r"(r10)
+        : "r"(num), "r"(a1), "r"(a2), "r"(a3)
+        : "rax", "rdi", "rsi", "rdx", "rcx", "r11", "memory"
     );
     return ret;
 }
@@ -84,7 +125,49 @@ void exit(int status)
 
 uint64_t fork(void)
 {
-    return syscall0(SYS_FORK);
+    return clone(CLONE_PROCESS, 0, 0, 0);
+}
+
+uint64_t clone(uint64_t mode, void *child_stack_top,
+               void (*entry)(void *), void *arg)
+{
+    return syscall4(SYS_CLONE, mode, (uint64_t)child_stack_top,
+                    (uint64_t)entry, (uint64_t)arg);
+}
+
+uint64_t getpid(void)
+{
+    return syscall0(SYS_GETPID);
+}
+
+uint64_t gettid(void)
+{
+    return syscall0(SYS_GETTID);
+}
+
+uint64_t thread_create(void *stack, uint64_t stack_size,
+                       void (*entry)(void *), void *arg)
+{
+    uint8_t *stack_top;
+
+    if (!stack || !stack_size || !entry) {
+        return (uint64_t)-1;
+    }
+
+    stack_top = (uint8_t *)stack + stack_size;
+    return clone(CLONE_THREAD, stack_top, entry, arg);
+}
+
+void thread_exit(int status)
+{
+    syscall1(SYS_THREAD_EXIT, (uint64_t)status);
+    while (1) {
+    }
+}
+
+uint64_t thread_join(uint64_t tid, int *status)
+{
+    return syscall2(SYS_THREAD_JOIN, tid, (uint64_t)status);
 }
 
 uint64_t wait(int *status)

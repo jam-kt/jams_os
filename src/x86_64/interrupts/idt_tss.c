@@ -108,11 +108,11 @@ void switch_mmu_and_tss(proc next)
         tss.rsp0 = (uint64_t)kstack_top & ~(16 - 1);    /* align */
     }
 
-    /* if the next proc is a user proc, update CR3 reg to point to the proc's
-     * unique page table. Kernel threads keep running on the kernel's page table.
+    /* if the next thread is a user thread, update CR3 reg to point to its
+     * owning process page table. Kernel threads keep the kernel page table.
      */
-    if (next->cr3) {
-        MMU_switch_p4(next->cr3);
+    if (next->owner && next->owner->cr3) {
+        MMU_switch_p4(next->owner->cr3);
     } else {
         uint64_t kernel_cr3 = MMU_get_kernel_p4();
         MMU_switch_p4(kernel_cr3);

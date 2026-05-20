@@ -21,12 +21,21 @@
 static scheduler sched = NULL;
 proc curr_proc = NULL;
 proc next_proc = NULL;
-static process_st main_proc;
+static process_st kernel_process;
+static thread_st main_thread;
 static uint64_t next_pid = 1;
+static uint64_t next_tid = 1;
 static int multitask_started = 0;
 
 static void thread_start(kproc_t entry, void *arg);
 static uintptr_t align_down(uintptr_t addr, size_t align);
+static process alloc_process(process parent, uint64_t cr3);
+static proc alloc_thread(process owner);
+static void destroy_process_address_space(process p);
+static int setup_kthread(proc new_proc, kproc_t entry_point, void *arg);
+int PROC_setup_uthread(proc new_proc, kproc_t entry_point, void *arg,
+                       uint64_t user_rsp);
+static void process_teardown(process exiting, int status);
 
 static void enqueue(proc_queue *q, proc p);
 static proc dequeue(proc_queue *q);
@@ -44,12 +53,17 @@ void multitask_init()
 void PROC_run(void)
 {
     if (!multitask_started) {
-        memset(&main_proc, 0, sizeof(main_proc));
-        PROC_init_queue(&main_proc.wait_child_exit);
-        main_proc.run_state = PROC_RUNNING;
-        main_proc.cr3 = MMU_get_kernel_p4();
-        curr_proc = &main_proc;
-        next_proc = &main_proc;
+        memset(&kernel_process, 0, sizeof(kernel_process));
+        memset(&main_thread, 0, sizeof(main_thread));
+        PROC_init_process(&kernel_process, NULL, MMU_get_kernel_p4());
+        kernel_process.pid = 0;
+        next_pid = 1;
+        PROC_init_thread(&main_thread, &kernel_process);
+        main_thread.tid = NO_THREAD;
+        main_thread.run_state = PROC_RUNNING;
+        PROC_link_thread(&kernel_process, &main_thread);
+        curr_proc = &main_thread;
+        next_proc = &main_thread;
         multitask_started = 1;
     }
 
@@ -65,66 +79,21 @@ void PROC_create_kthread(kproc_t entry_point, void *arg)
         return;
     }
 
-    proc new_proc = kmalloc(sizeof(*new_proc));
+    proc new_proc = alloc_thread(&kernel_process);
     if (!new_proc) {
         printk("PROC_create_kthread: failed to allocate proc\n");
         return;
     }
 
-    memset(new_proc, 0, sizeof(*new_proc));
-    PROC_init_fields(new_proc, curr_proc);
-
-    /* stack var serves as the base (low addr) of stack */
-    void *stack = kmalloc(DEFAULT_STACK_BYTES);
-    if (!stack) {
-        printk("PROC_create_kthread: failed to allocate stack\n");
-        kfree(new_proc);
+    if (setup_kthread(new_proc, entry_point, arg) < 0) {
+        PROC_unlink_thread(&kernel_process, new_proc);
+        if (kernel_process.live_threads > 0) {
+            kernel_process.live_threads--;
+        }
+        PROC_free_thread(new_proc);
         return;
     }
 
-    new_proc->kstack = stack;
-    new_proc->stacksize = DEFAULT_STACK_BYTES;
-    new_proc->cr3 = MMU_get_kernel_p4();
-
-    /* sp var serves as the stack pointer (high addr) of stack */
-    
-    uintptr_t sp = (uintptr_t)stack + DEFAULT_STACK_BYTES;
-    sp = align_down(sp, x86_64_ALIGNMENT);
-
-    uint64_t *stack_top = (uint64_t *)sp;
-
-    /* "pushing" what is normall saved on an interrupt (restored by iretq)  */
-    /* NOTE: on priv level changes IRETQ will pop more than RIP, CS, RFLAGS */
-    *--stack_top = 0;               /* SS (0 is fine for kernel mode)       */
-    *--stack_top = (uint64_t)sp;    /* RSP (Points to the top of the stack) */
-    *--stack_top = DEFAULT_RFLAGS;
-    *--stack_top = KERNEL_CS;
-    *--stack_top = (uint64_t)thread_start; /* set RIP to a trampoline */
-
-    /* "pushing" nothing for err and vector to mimic interrupt stub behavior */
-    *--stack_top = 0; /* error code */
-    *--stack_top = 0; /* vector */
-
-    /* "push" rest of context registers */
-    *--stack_top = 0;                       /* rax */
-    *--stack_top = 0;                       /* rcx */
-    *--stack_top = 0;                       /* rdx */
-    *--stack_top = (uint64_t)arg;           /* rsi */
-    *--stack_top = (uint64_t)entry_point;   /* rdi */
-    *--stack_top = 0;                       /* r8  */
-    *--stack_top = 0;                       /* r9  */
-    *--stack_top = 0;                       /* r10 */
-    *--stack_top = 0;                       /* r11 */
-    *--stack_top = 0;                       /* rbx */
-    *--stack_top = 0;                       /* rbp */
-    *--stack_top = 0;                       /* r12 */
-    *--stack_top = 0;                       /* r13 */
-    *--stack_top = 0;                       /* r14 */
-    *--stack_top = 0;                       /* r15 */
-
-    new_proc->state.rsp = (unsigned long)stack_top;
-
-    PROC_link_child(curr_proc, new_proc);
     sched->admit(new_proc);
 }
 
@@ -136,67 +105,35 @@ int PROC_create_uthread(kproc_t entry_point, void *arg, uint64_t cr3,
         return -1;
     }
 
-    proc new_proc = kmalloc(sizeof(*new_proc));
+    process parent = curr_proc ? curr_proc->owner : &kernel_process;
+    process new_process = alloc_process(parent, cr3);
+    proc new_proc;
+
+    if (!new_process) {
+        printk("PROC_create_uthread: failed to allocate process\n");
+        return -1;
+    }
+
+    new_proc = alloc_thread(new_process);
     if (!new_proc) {
         printk("PROC_create_uthread: failed to allocate proc\n");
+        PROC_free_process(new_process);
         return -1;
     }
 
-    memset(new_proc, 0, sizeof(*new_proc));
-    PROC_init_fields(new_proc, curr_proc);
-
-    /* stack var serves as the base (low addr) of stack */
-    void *kstack = kmalloc(DEFAULT_STACK_BYTES);
-    if (!kstack) {
-        printk("PROC_create_uthread: failed to allocate stack\n");
-        kfree(new_proc);
+    if (PROC_setup_uthread(new_proc, entry_point, arg,
+                           (uint64_t)ustack + DEFAULT_STACK_BYTES) < 0) {
+        PROC_unlink_thread(new_process, new_proc);
+        if (new_process->live_threads > 0) {
+            new_process->live_threads--;
+        }
+        PROC_free_thread(new_proc);
+        PROC_free_process(new_process);
         return -1;
     }
 
-    new_proc->kstack = kstack;
     new_proc->ustack = ustack;
-    new_proc->stacksize = DEFAULT_STACK_BYTES;
-    new_proc->cr3 = cr3;
-
-    /* sp vars serve as the stack pointers (high addr) of stacks */
-    uintptr_t ksp = (uintptr_t)kstack + DEFAULT_STACK_BYTES;
-    ksp = align_down(ksp, x86_64_ALIGNMENT);
-    uint64_t *kstack_top = (uint64_t *)ksp;
-
-    uintptr_t usp = (uintptr_t)ustack + DEFAULT_STACK_BYTES;
-    usp = align_down(usp, x86_64_ALIGNMENT);
-
-    /* "pushing" what is normall saved on an interrupt (restored by iretq)  */
-    *--kstack_top = USER_DS | USER_RPL;         /* SS */
-    *--kstack_top = (uint64_t)usp;              /* RSP (to the user stack) */
-    *--kstack_top = DEFAULT_RFLAGS;
-    *--kstack_top = USER_CS | USER_RPL;
-    *--kstack_top = (uint64_t)entry_point;      /* no trampoline */
-
-    /* "pushing" nothing for err and vector to mimic interrupt stub behavior */
-    *--kstack_top = 0; /* error code */
-    *--kstack_top = 0; /* vector */
-
-    /* "push" rest of context registers */
-    *--kstack_top = 0;                       /* rax */
-    *--kstack_top = 0;                       /* rcx */
-    *--kstack_top = 0;                       /* rdx */
-    *--kstack_top = 0;                       /* rsi */
-    *--kstack_top = (uint64_t)arg;           /* rdi */
-    *--kstack_top = 0;                       /* r8  */
-    *--kstack_top = 0;                       /* r9  */
-    *--kstack_top = 0;                       /* r10 */
-    *--kstack_top = 0;                       /* r11 */
-    *--kstack_top = 0;                       /* rbx */
-    *--kstack_top = 0;                       /* rbp */
-    *--kstack_top = 0;                       /* r12 */
-    *--kstack_top = 0;                       /* r13 */
-    *--kstack_top = 0;                       /* r14 */
-    *--kstack_top = 0;                       /* r15 */
-
-    new_proc->state.rsp = (unsigned long)kstack_top;
-
-    PROC_link_child(curr_proc, new_proc);
+    PROC_link_process_child(parent, new_process);
     sched->admit(new_proc);
     
     return 0;
@@ -208,7 +145,7 @@ void PROC_reschedule(void)
     if (candidate == NULL) {
         /* go to idle thread */
         if (multitask_started) {
-            next_proc = &main_proc;
+            next_proc = &main_thread;
         } else {
             next_proc = NULL;
         }
@@ -242,12 +179,174 @@ static uintptr_t align_down(uintptr_t addr, size_t align)
     return addr & ~(align - 1);
 }
 
+static process alloc_process(process parent, uint64_t cr3)
+{
+    process p = kmalloc(sizeof(*p));
+
+    if (!p) {
+        return NULL;
+    }
+
+    memset(p, 0, sizeof(*p));
+    PROC_init_process(p, parent, cr3);
+
+    return p;
+}
+
+static proc alloc_thread(process owner)
+{
+    proc t = kmalloc(sizeof(*t));
+
+    if (!t) {
+        return NULL;
+    }
+
+    memset(t, 0, sizeof(*t));
+    PROC_init_thread(t, owner);
+    PROC_link_thread(owner, t);
+
+    return t;
+}
+
+static void destroy_process_address_space(process p)
+{
+    if (!p || !p->cr3 || p->cr3 == MMU_get_kernel_p4()) {
+        return;
+    }
+
+    uint64_t old_cr3 = p->cr3;
+    uint64_t kernel_cr3 = MMU_get_kernel_p4();
+    MMU_switch_p4(kernel_cr3);
+    p->cr3 = 0;
+    MMU_destroy_userspace(old_cr3);
+}
+
+static int setup_kthread(proc new_proc, kproc_t entry_point, void *arg)
+{
+    void *stack = kmalloc(DEFAULT_STACK_BYTES);
+    uintptr_t sp;
+    uint64_t *stack_top;
+
+    if (!stack) {
+        printk("setup_kthread: failed to allocate stack\n");
+        return -1;
+    }
+
+    new_proc->kstack = stack;
+    sp = (uintptr_t)stack + DEFAULT_STACK_BYTES;
+    sp = align_down(sp, x86_64_ALIGNMENT);
+    stack_top = (uint64_t *)sp;
+
+    /* "pushing" what is normally saved on an interrupt. */
+    *--stack_top = 0;
+    *--stack_top = (uint64_t)sp;
+    *--stack_top = DEFAULT_RFLAGS;
+    *--stack_top = KERNEL_CS;
+    *--stack_top = (uint64_t)thread_start;
+
+    *--stack_top = 0;
+    *--stack_top = 0;
+
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = (uint64_t)arg;
+    *--stack_top = (uint64_t)entry_point;
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = 0;
+    *--stack_top = 0;
+
+    new_proc->state.rsp = (unsigned long)stack_top;
+
+    return 0;
+}
+
+int PROC_setup_uthread(proc new_proc, kproc_t entry_point, void *arg,
+                       uint64_t user_rsp)
+{
+    void *kstack = kmalloc(DEFAULT_STACK_BYTES);
+    uintptr_t ksp;
+    uintptr_t usp;
+    uint64_t *kstack_top;
+
+    if (!kstack) {
+        printk("setup_uthread: failed to allocate stack\n");
+        return -1;
+    }
+
+    new_proc->kstack = kstack;
+    ksp = (uintptr_t)kstack + DEFAULT_STACK_BYTES;
+    ksp = align_down(ksp, x86_64_ALIGNMENT);
+    kstack_top = (uint64_t *)ksp;
+
+    usp = align_down(user_rsp, x86_64_ALIGNMENT);
+
+    *--kstack_top = USER_DS | USER_RPL;
+    *--kstack_top = (uint64_t)usp;
+    *--kstack_top = DEFAULT_RFLAGS;
+    *--kstack_top = USER_CS | USER_RPL;
+    *--kstack_top = (uint64_t)entry_point;
+
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = (uint64_t)arg;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+    *--kstack_top = 0;
+
+    new_proc->ustack = (uint64_t *)user_rsp;
+    new_proc->state.rsp = (unsigned long)kstack_top;
+
+    return 0;
+}
+
+static void process_teardown(process exiting, int status)
+{
+    if (!exiting || exiting->zombie) {
+        return;
+    }
+
+    exiting->exiting = 1;
+    exiting->zombie = 1;
+    exiting->exit_status = status;
+    PROC_reparent_children(exiting);
+    destroy_process_address_space(exiting);
+
+    if (exiting->parent) {
+        PROC_unblock_all(&exiting->parent->wait_child_exit);
+    }
+}
+
 /*******************************************************************************
  * INTERNAL PROCESS HELPERS
  ******************************************************************************/
 proc PROC_main_proc(void)
 {
-    return &main_proc;
+    return &main_thread;
+}
+
+process PROC_main_process(void)
+{
+    return &kernel_process;
 }
 
 void PROC_admit(proc p)
@@ -260,19 +359,41 @@ void PROC_remove(proc p)
     sched->remove(p);
 }
 
-void PROC_init_fields(proc p, proc parent)
+void PROC_init_process(process p, process parent, uint64_t cr3)
 {
     p->pid = next_pid++;
-    p->stacksize = DEFAULT_STACK_BYTES;
-    p->run_state = PROC_READY;
-    p->exit_status = 0;
+    p->cr3 = cr3;
     p->parent = parent;
     p->first_child = NULL;
     p->next_sibling = NULL;
+    p->threads = NULL;
+    p->live_threads = 0;
+    p->exit_status = 0;
+    p->exiting = 0;
+    p->zombie = 0;
     PROC_init_queue(&p->wait_child_exit);
+    PROC_init_queue(&p->wait_thread_exit);
 }
 
-void PROC_link_child(proc parent, proc child)
+void PROC_init_thread(proc t, process owner)
+{
+    t->tid = next_tid++;
+    t->kstack = NULL;
+    t->ustack = NULL;
+    t->stacksize = DEFAULT_STACK_BYTES;
+    t->owner = owner;
+    memset(&t->state, 0, sizeof(t->state));
+    t->run_state = PROC_READY;
+    t->exit_status = 0;
+    t->next_thread = NULL;
+    t->lib_one = NULL;
+    t->lib_two = NULL;
+    t->sched_one = NULL;
+    t->sched_two = NULL;
+    t->exited = NULL;
+}
+
+void PROC_link_process_child(process parent, process child)
 {
     if (!parent || !child) {
         return;
@@ -283,10 +404,10 @@ void PROC_link_child(proc parent, proc child)
     parent->first_child = child;
 }
 
-void PROC_unlink_child(proc parent, proc child)
+void PROC_unlink_process_child(process parent, process child)
 {
-    proc prev = NULL;
-    proc curr;
+    process prev = NULL;
+    process curr;
 
     if (!parent || !child) {
         return;
@@ -310,12 +431,12 @@ void PROC_unlink_child(proc parent, proc child)
     }
 }
 
-proc PROC_find_zombie_child(proc parent)
+process PROC_find_zombie_child(process parent)
 {
-    for (proc child = parent ? parent->first_child : NULL;
+    for (process child = parent ? parent->first_child : NULL;
          child;
          child = child->next_sibling) {
-        if (child->run_state == PROC_ZOMBIE) {
+        if (child->zombie) {
             return child;
         }
     }
@@ -323,9 +444,9 @@ proc PROC_find_zombie_child(proc parent)
     return NULL;
 }
 
-void PROC_reparent_children(proc exiting)
+void PROC_reparent_children(process exiting)
 {
-    proc child;
+    process child;
 
     if (!exiting || !exiting->first_child) {
         return;
@@ -333,13 +454,139 @@ void PROC_reparent_children(proc exiting)
 
     child = exiting->first_child;
     while (child->next_sibling) {
-        child->parent = &main_proc;
+        child->parent = &kernel_process;
         child = child->next_sibling;
     }
-    child->parent = &main_proc;
-    child->next_sibling = main_proc.first_child;
-    main_proc.first_child = exiting->first_child;
+    child->parent = &kernel_process;
+    child->next_sibling = kernel_process.first_child;
+    kernel_process.first_child = exiting->first_child;
     exiting->first_child = NULL;
+}
+
+void PROC_link_thread(process owner, proc t)
+{
+    if (!owner || !t) {
+        return;
+    }
+
+    t->owner = owner;
+    t->next_thread = owner->threads;
+    owner->threads = t;
+    owner->live_threads++;
+}
+
+void PROC_unlink_thread(process owner, proc t)
+{
+    proc prev = NULL;
+    proc curr;
+
+    if (!owner || !t) {
+        return;
+    }
+
+    curr = owner->threads;
+    while (curr) {
+        if (curr == t) {
+            if (prev) {
+                prev->next_thread = curr->next_thread;
+            } else {
+                owner->threads = curr->next_thread;
+            }
+            curr->next_thread = NULL;
+            return;
+        }
+
+        prev = curr;
+        curr = curr->next_thread;
+    }
+}
+
+proc PROC_find_thread(process owner, uint64_t tid)
+{
+    for (proc t = owner ? owner->threads : NULL; t; t = t->next_thread) {
+        if (t->tid == tid) {
+            return t;
+        }
+    }
+
+    return NULL;
+}
+
+void PROC_free_thread(proc t)
+{
+    if (!t) {
+        return;
+    }
+
+    if (t->kstack) {
+        kfree(t->kstack);
+    }
+    kfree(t);
+}
+
+void PROC_free_process(process p)
+{
+    if (!p) {
+        return;
+    }
+
+    kfree(p);
+}
+
+int PROC_exit_current_thread(int status, int whole_process)
+{
+    process owner;
+
+    if (!curr_proc) {
+        return -1;
+    }
+
+    if (curr_proc == &main_thread) {
+        printk("exit called on main thread, halting\n");
+        __asm__("hlt");
+    }
+
+    owner = curr_proc->owner;
+    if (!owner) {
+        return -1;
+    }
+
+    if (whole_process && owner != &kernel_process) {
+        proc t = owner->threads;
+
+        owner->exiting = 1;
+        while (t) {
+            if (t->run_state != PROC_ZOMBIE) {
+                if (t->run_state == PROC_READY ||
+                    t->run_state == PROC_RUNNING) {
+                    PROC_remove(t);
+                }
+                t->run_state = PROC_ZOMBIE;
+                t->exit_status = status;
+            }
+            t = t->next_thread;
+        }
+
+        owner->live_threads = 0;
+        process_teardown(owner, status);
+        PROC_unblock_all(&owner->wait_thread_exit);
+    } else {
+        curr_proc->run_state = PROC_ZOMBIE;
+        curr_proc->exit_status = status;
+        if (owner->live_threads > 0) {
+            owner->live_threads--;
+        }
+        PROC_remove(curr_proc);
+        PROC_unblock_all(&owner->wait_thread_exit);
+        if (owner->live_threads == 0) {
+            process_teardown(owner, status);
+        }
+    }
+
+    curr_proc = NULL;
+    PROC_reschedule();
+
+    return 0;
 }
 
 int PROC_copy_user_string(char *dst, const char *src, size_t dst_size)
@@ -401,10 +648,14 @@ void PROC_unblock_head(proc_queue *q)
         return;
     }
 
-    proc p = dequeue(q);
-    if (p) {
-        p->run_state = PROC_READY;
-        sched->admit(p);
+    while (q->head) {
+        proc p = dequeue(q);
+        if (p && p->run_state != PROC_ZOMBIE &&
+            (!p->owner || !p->owner->exiting)) {
+            p->run_state = PROC_READY;
+            sched->admit(p);
+            return;
+        }
     }
 }
 

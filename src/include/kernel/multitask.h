@@ -42,8 +42,11 @@ typedef struct __attribute__ ((aligned(16))) __attribute__ ((packed)) regs {
 
 #define NO_THREAD 0             /* an always invalid thread id */
 
-typedef struct process_st *proc;
-/* queue for blocked processes */
+typedef struct thread_st *thread;
+typedef struct thread_st *proc;       /* legacy name: schedulable thread */
+typedef struct process_st *process;
+
+/* queue for blocked threads */
 typedef struct proc_queue {
     proc head;
     proc tail;
@@ -56,25 +59,40 @@ typedef enum proc_state {
     PROC_ZOMBIE
 } proc_state_t;
 
-typedef struct process_st {
-    uint64_t    pid;            /* lightweight process id  */
+typedef struct thread_st {
+    uint64_t    tid;            /* kernel thread id        */
     uint64_t    *kstack;        /* Base of kernel stack    */
     uint64_t    *ustack;        /* Base of user stack      */
     size_t      stacksize;      /* Size of the two stack   */
-    uint64_t    cr3;            /* addr of user P4 table   */
+    process     owner;          /* owning process/group    */
     rfile       state;          /* saved registers         */
     proc_state_t run_state;
     int         exit_status;
-    proc        parent;
-    proc        first_child;
-    proc        next_sibling;
-    proc_queue  wait_child_exit;
+    proc        next_thread;
     proc        lib_one;        /* Two pointers reserved   */
     proc        lib_two;        /* for use by the library  */
     proc        sched_one;      /* Two more for            */
     proc        sched_two;      /* schedulers to use       */
     proc        exited;         /* and one for lwp_wait()  */
+} thread_st;
+
+typedef struct process_st {
+    uint64_t    pid;            /* process/thread group id */
+    uint64_t    cr3;            /* addr of user P4 table   */
+    process     parent;
+    process     first_child;
+    process     next_sibling;
+    proc        threads;
+    uint64_t    live_threads;
+    int         exit_status;
+    int         exiting;
+    int         zombie;
+    proc_queue  wait_child_exit;
+    proc_queue  wait_thread_exit;
 } process_st;
+
+#define CLONE_PROCESS 0
+#define CLONE_THREAD  1
 
 
 void PROC_init_queue(proc_queue *q);
