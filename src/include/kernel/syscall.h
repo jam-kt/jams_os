@@ -60,5 +60,9 @@ void register_syscall(int sys_num, sys_t handler);
 #define SYS_GETTID_NUM 9
 #define SYS_THREAD_EXIT_NUM 10
 #define SYS_THREAD_JOIN_NUM 11
+#define SYS_MUTEX_CREATE_NUM 12
+#define SYS_MUTEX_LOCK_NUM 13
+#define SYS_MUTEX_UNLOCK_NUM 14
+#define SYS_MUTEX_DESTROY_NUM 15
 
 #endif

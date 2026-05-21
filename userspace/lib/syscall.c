@@ -2,6 +2,7 @@
 
 #include <userlib.h>
 
+#define SYS_YIELD 0
 #define SYS_EXIT 1
 #define SYS_GETC 2
 #define SYS_PUTC 3
@@ -13,6 +14,10 @@
 #define SYS_GETTID 9
 #define SYS_THREAD_EXIT 10
 #define SYS_THREAD_JOIN 11
+#define SYS_MUTEX_CREATE 12
+#define SYS_MUTEX_LOCK 13
+#define SYS_MUTEX_UNLOCK 14
+#define SYS_MUTEX_DESTROY 15
 
 static inline uint64_t syscall0(uint64_t num) 
 {
@@ -116,6 +121,11 @@ char getc(void)
     return (char)syscall0(SYS_GETC);
 }
 
+void yield(void)
+{
+    syscall0(SYS_YIELD);
+}
+
 void exit(int status) 
 {
     syscall1(SYS_EXIT, (uint64_t)status);
@@ -168,6 +178,58 @@ void thread_exit(int status)
 uint64_t thread_join(uint64_t tid, int *status)
 {
     return syscall2(SYS_THREAD_JOIN, tid, (uint64_t)status);
+}
+
+int mutex_init(mutex_t *mutex)
+{
+    uint64_t id;
+
+    if (!mutex) {
+        return -1;
+    }
+
+    id = syscall0(SYS_MUTEX_CREATE);
+    if (!id) {
+        mutex->id = 0;
+        return -1;
+    }
+
+    mutex->id = id;
+    return 0;
+}
+
+int mutex_lock(mutex_t *mutex)
+{
+    if (!mutex || !mutex->id) {
+        return -1;
+    }
+
+    return (int)syscall1(SYS_MUTEX_LOCK, mutex->id);
+}
+
+int mutex_unlock(mutex_t *mutex)
+{
+    if (!mutex || !mutex->id) {
+        return -1;
+    }
+
+    return (int)syscall1(SYS_MUTEX_UNLOCK, mutex->id);
+}
+
+int mutex_destroy(mutex_t *mutex)
+{
+    int ret;
+
+    if (!mutex || !mutex->id) {
+        return -1;
+    }
+
+    ret = (int)syscall1(SYS_MUTEX_DESTROY, mutex->id);
+    if (ret == 0) {
+        mutex->id = 0;
+    }
+
+    return ret;
 }
 
 uint64_t wait(int *status)

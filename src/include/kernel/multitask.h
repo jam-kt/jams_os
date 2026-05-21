@@ -97,6 +97,7 @@ typedef struct process_st {
 
 void PROC_init_queue(proc_queue *q);
 void PROC_block_on(proc_queue *q, int enable_ints);
+proc PROC_unblock_one(proc_queue *q);
 void PROC_unblock_head(proc_queue *q);
 void PROC_unblock_all(proc_queue *q);
 int num_proc_runnable();

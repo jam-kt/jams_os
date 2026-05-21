@@ -4,7 +4,8 @@
 
 #define THREAD_COUNT 3
 #define THREAD_STACK_QWORDS 512
-#define THREAD_ITERS 1000
+#define THREAD_ITERS 100000
+#define RACE_YIELD_EVERY 8
 
 struct thread_arg {
     int index;
@@ -14,6 +15,8 @@ struct thread_arg {
 static uint64_t thread_stacks[THREAD_COUNT][THREAD_STACK_QWORDS];
 static struct thread_arg thread_args[THREAD_COUNT];
 static volatile uint64_t shared_counter = 0;
+static volatile uint64_t locked_counter = 0;
+static mutex_t counter_mutex;
 
 static void test_fork_exec_wait(void)
 {
@@ -55,7 +58,25 @@ static void counter_thread(void *arg)
     puts(" starting\n");
 
     for (int i = 0; i < THREAD_ITERS; i++) {
-        shared_counter = shared_counter + 1;
+        uint64_t snapshot = shared_counter;
+        uint64_t locked_snapshot = shared_counter;
+
+        if ((i % RACE_YIELD_EVERY) == 0) {
+            yield();
+        }
+        
+        shared_counter = snapshot + 1;
+
+        if (mutex_lock(&counter_mutex) < 0) {
+            thread_exit(90);
+        }
+
+        locked_snapshot = locked_counter;
+        locked_counter = locked_snapshot + 1;
+
+        if (mutex_unlock(&counter_mutex) < 0) {
+            thread_exit(91);
+        }
     }
 
     thread_exit(targ->status);
@@ -72,6 +93,13 @@ static void test_threads(void)
     puts(" tid ");
     putnum(gettid());
     putc('\n');
+
+    shared_counter = 0;
+    locked_counter = 0;
+    if (mutex_init(&counter_mutex) < 0) {
+        puts("init: mutex_init failed\n");
+        return;
+    }
 
     for (int i = 0; i < THREAD_COUNT; i++) {
         thread_args[i].index = i;
@@ -99,7 +127,17 @@ static void test_threads(void)
     putnum(shared_counter);
     puts(" with an expected value of ");
     putnum(THREAD_COUNT * THREAD_ITERS);
-    putc('\n\n');
+    puts("\n\n");
+
+    puts("init: locked counter final value: ");
+    putnum(locked_counter);
+    puts(" with an expected value of ");
+    putnum(THREAD_COUNT * THREAD_ITERS);
+    puts("\n\n");
+
+    if (mutex_destroy(&counter_mutex) < 0) {
+        puts("init: mutex_destroy failed\n");
+    }
 }
 
 int main(void) 
