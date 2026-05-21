@@ -113,13 +113,7 @@ static uint64_t syscall_wait(struct syscall_frame *frame)
         }
 
         CLI();
-        curr_proc->run_state = PROC_BLOCKED;
         PROC_block_on(&parent->wait_child_exit, 1);
-        CLI();
-        if (curr_proc) {
-            curr_proc->run_state = PROC_RUNNING;
-        }
-        STI();
     }
 }
 
@@ -239,13 +233,7 @@ static uint64_t syscall_thread_join(struct syscall_frame *frame)
 
     while (target->run_state != PROC_ZOMBIE) {
         CLI();
-        curr_proc->run_state = PROC_BLOCKED;
         PROC_block_on(&owner->wait_thread_exit, 1);
-        CLI();
-        if (curr_proc) {
-            curr_proc->run_state = PROC_RUNNING;
-        }
-        STI();
 
         target = PROC_find_thread(owner, tid);
         if (!target) {
@@ -331,7 +319,6 @@ static uint64_t clone_process(struct syscall_frame *frame)
     child->kstack = kstack;
     child->ustack = parent_thread->ustack;
     child->stacksize = parent_thread->stacksize;
-    child->run_state = PROC_READY;
 
     /* copy the kernel stack contents and then edit the return value to 0.
      * This means fork will return the child's PID for the parent, and 0 for the

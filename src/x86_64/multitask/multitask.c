@@ -6,6 +6,7 @@
 #include <kernel/interrupts.h>
 #include <kernel/kmalloc.h>
 #include <kernel/memory.h>
+#include <kernel/mutex.h>
 #include <kernel/scheduler.h>
 #include <kernel/multitask.h>
 
@@ -48,6 +49,7 @@ void multitask_init()
 {
     sched = round_robin;
     PROC_register_syscalls();
+    MUTEX_register_syscalls();
 }
 
 void PROC_run(void)
@@ -329,6 +331,7 @@ static void process_teardown(process exiting, int status)
     exiting->zombie = 1;
     exiting->exit_status = status;
     PROC_reparent_children(exiting);
+    MUTEX_destroy_process_mutexes(exiting);
     destroy_process_address_space(exiting);
 
     if (exiting->parent) {
@@ -640,12 +643,14 @@ void PROC_block_on(proc_queue *q, int enable_ints)
 
 void PROC_unblock_head(proc_queue *q)
 {
-    if (!q || !q->head) {
-        // printk("PROC_unblock_head: queue or queue head is null");
-        // printk("This warning may be harmless if no thread called the blocking
-        //     wait function but the ISR related to it fired. Ex. keyboard ISR but
-        //     no thread is calling kbd_read\n");
-        return;
+    (void)PROC_unblock_one(q);
+}
+
+proc PROC_unblock_one(proc_queue *q)
+{
+    if (!q) {
+        printk("PROC_unblock_one: queue is null\n");
+        return NULL;
     }
 
     while (q->head) {
@@ -654,9 +659,11 @@ void PROC_unblock_head(proc_queue *q)
             (!p->owner || !p->owner->exiting)) {
             p->run_state = PROC_READY;
             sched->admit(p);
-            return;
+            return p;
         }
     }
+
+    return NULL;
 }
 
 void PROC_unblock_all(proc_queue *q)
